@@ -36,6 +36,6 @@ spec:
         - name: REDIS_HOST
           value: "redis"
         - name: RRDCACHED_SERVER
-          value: "192.168.44.200:42217"
+          value: "192.168.98.131:42217"
         ports:
         - containerPort: 8000
