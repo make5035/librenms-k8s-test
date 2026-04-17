@@ -20,7 +20,7 @@ spec:
         - name: DB_HOST
           value: "192.168.98.131"
         - name: DB_PORT
-          value: "3307"
+          value: "3306"
         - name: DB_DATABASE
           value: "librenms"
         - name: DB_USERNAME
