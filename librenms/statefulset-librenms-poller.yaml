@@ -71,7 +71,7 @@ spec:
               mountPath: /data
       containers:
         - name: dispatcher
-          image: librenms/librenms:latest
+          image: librenms/librenms:26.2.0
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ
