@@ -2,5 +2,4 @@
 *.tmp
 .env
 *.bak
-*secret.yaml
 *.dec.yaml
