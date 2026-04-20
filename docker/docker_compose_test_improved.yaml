@@ -68,7 +68,7 @@ services:
 
   # ── RRDcached 1.9.0 ─────────────────────────────────────────────────────────
   rrdcached:
-    image: crazymax/rrdcached:1.9.0
+    image: crazymax/rrdcached:1.9.0-r0
     container_name: librenms_test_rrdcached
     hostname: rrdcached
     volumes:
