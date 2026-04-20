@@ -1,5 +1,24 @@
-*.log
-*.tmp
+# === SECRETS — ne jamais committer ===
 .env
-*.bak
-*.dec.yaml
+*.env
+!*.env.example          # exception : les templates sont versionnés
+librenms.env
+!librenms.env.example
+
+# === DONNÉES LOCALES DOCKER — potentiellement des centaines de Go ===
+docker/data/
+
+# === FICHIERS SYSTÈME ===
+.DS_Store
+Thumbs.db
+*~
+*.swp
+
+# === CERTIFICATS ===
+*.cer
+*.crt
+*.key
+*.pem
+
+# === LOGS ===
+*.log

@@ -1,0 +1,341 @@
+# ==============================================================================
+# docker-compose-test-IMPROVED.yml
+# ==============================================================================
+# À utiliser APRÈS validation du fichier strict.
+# Chaque amélioration est documentée avec :
+#   [AMÉLIORATION] — ce qui change
+#   [RAISON]       — pourquoi c'est utile pour la migration K8s
+#   [RISQUE PROD]  — impact si appliqué tel quel en production
+#
+# Aucune de ces améliorations ne touche la prod en l'état.
+# Ce fichier sert à valider les changements avant de les porter
+# dans les manifests Kubernetes.
+# ==============================================================================
+
+version: "3.8"
+# [AMÉLIORATION] version 3.8 au lieu de 3.5
+# [RAISON]       accès aux fonctionnalités depends_on avec condition,
+#                healthcheck complet, ulimits — nécessaires pour reproduire
+#                le comportement des probes K8s (readiness/liveness)
+# [RISQUE PROD]  aucun — rétrocompatible, Docker Compose ignore les directives
+#                inconnues des versions antérieures
+
+services:
+
+  # ── MariaDB 10.5.29 ─────────────────────────────────────────────────────────
+  mariadb:
+    image: mariadb:10.5
+    container_name: librenms_test_mariadb
+    # [AMÉLIORATION] container_name explicite
+    # [RAISON]       facilite les scripts de migration (mysqldump, healthcheck
+    #                externe) sans avoir à deviner le nom généré par Compose
+    # [RISQUE PROD]  aucun en test — en prod éviter les noms fixes sur cluster
+    hostname: mariadb
+    command:
+      - "mysqld"
+      - "--innodb-file-per-table=1"
+      - "--lower-case-table-names=0"
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+      - "--max_connections=1000"
+    volumes:
+      - "./data/db:/var/lib/mysql"
+    ports:
+      - "3306:3306"
+    environment:
+      - "TZ=${TZ}"
+      - "MYSQL_ALLOW_EMPTY_PASSWORD=yes"
+      - "MYSQL_DATABASE=${MYSQL_DATABASE}"
+      - "MYSQL_USER=${MYSQL_USER}"
+      - "MYSQL_PASSWORD=${MYSQL_PASSWORD}"
+    healthcheck:
+      # [AMÉLIORATION] healthcheck natif MariaDB
+      # [RAISON]       reproduit le comportement d'une readinessProbe K8s —
+      #                librenms ne démarre que quand la DB est réellement prête,
+      #                exactement comme en K8s avec initContainers ou probes.
+      #                Permet d'observer les vrais délais de démarrage et
+      #                d'anticiper les valeurs initialDelaySeconds / periodSeconds
+      #                à mettre dans les manifests K8s
+      # [RISQUE PROD]  aucun — améliore la stabilité au démarrage
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "--silent"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: always
+    networks:
+      - net
+
+  # ── RRDcached 1.9.0 ─────────────────────────────────────────────────────────
+  rrdcached:
+    image: crazymax/rrdcached:1.9.0
+    container_name: librenms_test_rrdcached
+    hostname: rrdcached
+    volumes:
+      - "./data/rrdcached/db:/data/db"
+      - "./data/rrdcached/journal:/data/journal"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "LOG_LEVEL=LOG_INFO"
+      - "WRITE_TIMEOUT=1800"
+      - "WRITE_JITTER=1800"
+      - "WRITE_THREADS=4"
+      - "FLUSH_DEAD_DATA_INTERVAL=3600"
+    ports:
+      - "42217:42217"
+    restart: always
+    networks:
+      - net
+
+  # ── Memcached 1.6.41 ────────────────────────────────────────────────────────
+  memcached:
+    image: memcached:1.6.41
+    container_name: librenms_test_memcached
+    hostname: memcached
+    environment:
+      - "TZ=${TZ}"
+    restart: always
+    networks:
+      - net
+
+  # ── Redis 5.0.14 ────────────────────────────────────────────────────────────
+  redis:
+    image: redis:5.0-alpine
+    container_name: librenms_test_redis
+    hostname: redis
+    environment:
+      - "TZ=${TZ}"
+    ports:
+      - "6379:6379"
+    healthcheck:
+      # [AMÉLIORATION] healthcheck Redis
+      # [RAISON]       même logique que MariaDB — anticipe les valeurs de probe
+      #                K8s pour le déploiement Redis. Permet aussi de valider
+      #                que le dispatcher ne tente pas de consommer la queue
+      #                avant que Redis soit opérationnel
+      # [RISQUE PROD]  aucun
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: always
+    networks:
+      - net
+
+  # ── LibreNMS 26.2.0 — Frontend ──────────────────────────────────────────────
+  librenms:
+    image: librenms/librenms:26.2.0
+    container_name: librenms_test_web
+    hostname: librenms
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    ports:
+      - target: 8000
+        published: 8000
+        protocol: tcp
+    depends_on:
+      mariadb:
+        condition: service_healthy
+        # [AMÉLIORATION] depends_on avec condition: service_healthy
+        # [RAISON]       en K8s il n'existe pas de depends_on — on utilise des
+        #                initContainers ou des readinessProbes. Ce mode permet
+        #                d'observer combien de temps LibreNMS attend réellement
+        #                MariaDB au premier boot, et de calibrer les valeurs
+        #                initialDelaySeconds dans les manifests K8s.
+        #                Reproduit aussi les crashloops que K8s gérerait via
+        #                restartPolicy si la DB n'est pas prête
+        # [RISQUE PROD]  aucun — améliore la stabilité
+      redis:
+        condition: service_healthy
+      memcached:
+        condition: service_started
+      rrdcached:
+        condition: service_started
+    volumes:
+      - "./data/librenms:/data"
+      - "./data/rrdcached/db:/mnt/rrdcached/db"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=${MYSQL_HOST}"
+      - "DB_NAME=${MYSQL_DATABASE}"
+      - "DB_USER=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "REDIS_HOST=${REDIS_HOST}"
+      - "REDIS_PORT=${REDIS_PORT}"
+      - "REDIS_DB=0"
+      - "RRDCACHED_SERVER=rrdcached:42217"
+      # [AMÉLIORATION] RRDCACHED_SERVER déclaré explicitement dans environment
+      # [RAISON]       en K8s cette variable sera dans un ConfigMap ou Secret —
+      #                la déclarer ici permet de vérifier qu'elle est bien prise
+      #                en compte et de valider le bon fonctionnement des graphes
+      #                avant de construire les manifests
+      # [RISQUE PROD]  vérifier que librenms.env prod ne la définit pas en
+      #                doublon avec une valeur différente (priorité env > env_file)
+    restart: always
+    networks:
+      - net
+
+  # ── Dispatcher / Poller ─────────────────────────────────────────────────────
+  # [AMÉLIORATION] dispatcher activé (commenté en prod)
+  # [RAISON]       en K8s le dispatcher sera un Deployment séparé scalable.
+  #                L'activer ici permet de valider la communication
+  #                Redis queue → dispatcher → RRDcached sur l'env de test,
+  #                avant de porter cette logique dans les manifests K8s.
+  #                Également utile pour observer les logs de polling et
+  #                anticiper les ressources CPU/RAM à allouer aux pods pollers.
+  # [RISQUE PROD]  aucun impact prod — ne pas activer sur la prod sans test
+  dispatcher:
+    image: librenms/librenms:26.2.0
+    container_name: librenms_test_dispatcher
+    hostname: librenms-poller-test01
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      librenms:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      rrdcached:
+        condition: service_started
+    volumes:
+      - "./data/librenms:/data"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=${MYSQL_HOST}"
+      - "DB_NAME=${MYSQL_DATABASE}"
+      - "DB_USER=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "DISPATCHER_NODE_ID=poller-test-01"
+      - "REDIS_HOST=${REDIS_HOST}"
+      - "REDIS_PORT=${REDIS_PORT}"
+      - "REDIS_DB=0"
+      - "REDIS_SCHEME=tcp"
+      - "REDIS_PASSWORD="
+      - "SIDECAR_DISPATCHER=1"
+      - "RRDCACHED_SERVER=rrdcached:42217"
+    restart: always
+    networks:
+      - net
+
+  # ── Syslog-ng 4.8.3 ─────────────────────────────────────────────────────────
+  syslogng:
+    image: librenms/librenms:26.2.0
+    container_name: librenms_test_syslogng
+    hostname: librenms-syslogng
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      librenms:
+        condition: service_started
+    ports:
+      - target: 514
+        published: 514
+        protocol: tcp
+      - target: 514
+        published: 514
+        protocol: udp
+    volumes:
+      - "./data/librenms:/data"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=${MYSQL_HOST}"
+      - "DB_NAME=${MYSQL_DATABASE}"
+      - "DB_USER=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "REDIS_HOST=${REDIS_HOST}"
+      - "REDIS_PORT=${REDIS_PORT}"
+      - "REDIS_DB=0"
+      - "SIDECAR_SYSLOGNG=1"
+    restart: always
+    networks:
+      - net
+
+  # ── SNMPTrapd 5.9.4 ─────────────────────────────────────────────────────────
+  snmptrapd:
+    image: librenms/librenms:26.2.0
+    container_name: librenms_test_snmptrapd
+    hostname: librenms-snmptrapd
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      librenms:
+        condition: service_started
+    ports:
+      - target: 162
+        published: 162
+        protocol: tcp
+      - target: 162
+        published: 162
+        protocol: udp
+    volumes:
+      - "./data/librenms:/data"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=${MYSQL_HOST}"
+      - "DB_NAME=${MYSQL_DATABASE}"
+      - "DB_USER=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "SIDECAR_SNMPTRAPD=1"
+    restart: always
+    networks:
+      - net
+
+# ── Réseau ────────────────────────────────────────────────────────────────────
+networks:
+  net:
+    driver: "bridge"
+    ipam:
+      config:
+        - subnet: 10.200.0.0/24
+
+# ==============================================================================
+# AMÉLIORATIONS NON IMPLÉMENTÉES ICI — À VALIDER EN K8s DIRECTEMENT
+# ==============================================================================
+#
+# [1] Logging centralisé (json-file driver avec rotation)
+#     → En K8s : géré par le daemonset de log (Fluentd/Loki)
+#     → Pourquoi pas ici : changer le log driver modifie le comportement
+#       de "docker logs" et peut masquer des effets de bord à observer
+#
+# [2] Resource limits (mem_limit / cpus)
+#     → En K8s : requests/limits dans les manifests
+#     → Pourquoi pas ici : l'env de test doit révéler la consommation réelle,
+#       pas l'écraser avec des limites artificielles. Observer d'abord,
+#       dimensionner ensuite.
+#
+# [3] Secrets via Docker Secrets ou Vault
+#     → En K8s : Secrets natifs ou external-secrets
+#     → Pourquoi pas ici : surcharge inutile pour un env de test temporaire
+#
+# [4] Réseau en mode "host" pour les pollers
+#     → En K8s : hostNetwork: true sur les pods pollers si ICMP/SNMP posent
+#       problème avec le CNI
+#     → Pourquoi pas ici : tester d'abord en bridge, observer les éventuels
+#       problèmes de routing SNMP, puis décider
+# ==============================================================================

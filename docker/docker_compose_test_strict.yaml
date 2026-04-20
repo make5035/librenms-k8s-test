@@ -1,0 +1,261 @@
+# ==============================================================================
+# docker-compose-test-STRICT.yml
+# ==============================================================================
+# Objectif : reproduire les conditions exactes de la prod pour le test
+#            de migration vers K8s. Zéro amélioration, zéro divergence.
+#
+# Différences INTENTIONNELLES et UNIQUEMENT justifiées par la nature du test :
+#   1. Images épinglées (prod utilise :latest — risque de dérive en test)
+#        mariadb:10.5        au lieu de mariadb:10.5       (identique, tag stable)
+#        crazymax/rrdcached:1.9.0  au lieu de crazymax/rrdcached (sans tag)
+#        librenms/librenms:26.2.0  au lieu de librenms/librenms:latest
+#        redis:5.0-alpine    identique
+#        memcached:1.6.41    au lieu de memcached:alpine (alpine sans version)
+#   2. Volumes locaux ./data/ au lieu de /srv/ (pas de données de prod montées)
+#   3. Traefik remplacé par exposition directe port 8000 (pas de certs TLS en test)
+#   4. Subnet interne 10.200.0.0/24 au lieu de 192.168.10.0/24
+#        → évite chevauchement avec prod (172.28.0.0/24) et K8s (192.168.98.0/24)
+#   5. REDIS_HOST pointe sur le conteneur local "redis" au lieu du host prod
+#        (prod : invnms-pxg01.cpa-sante.priv)
+#
+# Tout le reste est strictement identique à la prod :
+#   - Même env_file librenms.env (adapter les valeurs sensibles)
+#   - Même flags mysqld
+#   - Même variables d'environnement
+#   - Même restart: always
+#   - Même réseau nommé "net"
+#   - Même structure depends_on sans healthcheck
+#   - Même caps NET_ADMIN / NET_RAW
+#   - Dispatcher commenté (identique à la prod)
+# ==============================================================================
+
+version: "3.5"
+
+services:
+
+  # ── MariaDB 10.5.29 ─────────────────────────────────────────────────────────
+  mariadb:
+    image: mariadb:10.5
+#    container_name: librenms_db
+    command:
+      - "mysqld"
+      - "--innodb-file-per-table=1"
+      - "--lower-case-table-names=0"
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+      - "--max_connections=1000"
+    volumes:
+      - "./data/db:/var/lib/mysql"
+    ports:
+      - "3306:3306"
+    environment:
+      - "TZ=${TZ}"
+      - "MYSQL_ALLOW_EMPTY_PASSWORD=yes"
+      - "MYSQL_DATABASE=${MYSQL_DATABASE}"
+      - "MYSQL_USER=${MYSQL_USER}"
+      - "MYSQL_PASSWORD=${MYSQL_PASSWORD}"
+    restart: always
+    networks:
+      - net
+
+  # ── RRDcached 1.9.0 ─────────────────────────────────────────────────────────
+  rrdcached:
+    image: crazymax/rrdcached:1.9.0
+#    container_name: librenms_rrdcached
+    volumes:
+      - "./data/rrdcached/db:/data/db"
+      - "./data/rrdcached/journal:/data/journal"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "LOG_LEVEL=LOG_INFO"
+      - "WRITE_TIMEOUT=1800"
+      - "WRITE_JITTER=1800"
+      - "WRITE_THREADS=4"
+      - "FLUSH_DEAD_DATA_INTERVAL=3600"
+    ports:
+      - "42217:42217"
+    restart: always
+    networks:
+      - net
+
+  # ── Memcached 1.6.41 ────────────────────────────────────────────────────────
+  memcached:
+    image: memcached:1.6.41
+#    container_name: librenms_memcached
+    environment:
+      - "TZ=${TZ}"
+    restart: always
+    networks:
+      - net
+
+  # ── Redis 5.0.14 ────────────────────────────────────────────────────────────
+  redis:
+    image: redis:5.0-alpine
+#    container_name: librenms_redis
+    environment:
+      - "TZ=${TZ}"
+    ports:
+      - "6379:6379"
+    restart: always
+    networks:
+      - net
+
+  # ── LibreNMS 26.2.0 — Frontend ──────────────────────────────────────────────
+  librenms:
+    image: librenms/librenms:26.2.0
+#    container_name: librenms
+    hostname: librenms
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    ports:
+      - target: 8000
+        published: 8000
+        protocol: tcp
+    depends_on:
+      - mariadb
+      - memcached
+      - rrdcached
+    volumes:
+      - "./data/librenms:/data"
+      # Certificat CA interne — créer un fichier vide si absent en test
+      # - "./data/certs/ca.cer:/usr/local/share/ca-certificates/vs_ca.cer"
+      # - "./data/resources/views/menu:/opt/librenms/resources/views/menu"
+      - "./data/rrdcached/db:/mnt/rrdcached/db"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=${MYSQL_HOST}"
+      - "DB_NAME=${MYSQL_DATABASE}"
+      - "DB_USER=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "REDIS_HOST=${REDIS_HOST}"
+      - "REDIS_PORT=${REDIS_PORT}"
+      - "REDIS_DB=0"
+    restart: always
+    networks:
+      - net
+
+  # ── Dispatcher / Poller — commenté comme en prod ────────────────────────────
+#  dispatcher:
+#    image: librenms/librenms:26.2.0
+#    hostname: ${POLLER_NAME}
+#    cap_add:
+#      - NET_ADMIN
+#      - NET_RAW
+#    depends_on:
+#      - librenms
+#      - redis
+#      - rrdcached
+#    volumes:
+#      - "./data/librenms:/data"
+#    env_file:
+#      - "./librenms.env"
+#    environment:
+#      - "TZ=${TZ}"
+#      - "PUID=${PUID}"
+#      - "PGID=${PGID}"
+#      - "DB_HOST=${MYSQL_HOST}"
+#      - "DB_NAME=${MYSQL_DATABASE}"
+#      - "DB_USER=${MYSQL_USER}"
+#      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+#      - "DB_TIMEOUT=60"
+#      - "DISPATCHER_NODE_ID=${POLLER_NAME}"
+#      - "REDIS_HOST=${REDIS_HOST}"
+#      - "REDIS_PORT=${REDIS_PORT}"
+#      - "REDIS_DB=0"
+#      - "SIDECAR_DISPATCHER=1"
+#    restart: always
+#    networks:
+#      - net
+
+  # ── Syslog-ng 4.8.3 ─────────────────────────────────────────────────────────
+  syslogng:
+    image: librenms/librenms:26.2.0
+#    container_name: librenms_syslogng
+    hostname: librenms-syslogng
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      - librenms
+    ports:
+      - target: 514
+        published: 514
+        protocol: tcp
+      - target: 514
+        published: 514
+        protocol: udp
+    volumes:
+      - "./data/librenms:/data"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=${MYSQL_HOST}"
+      - "DB_NAME=${MYSQL_DATABASE}"
+      - "DB_USER=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "REDIS_HOST=${REDIS_HOST}"
+      - "REDIS_PORT=${REDIS_PORT}"
+      - "REDIS_DB=0"
+      - "SIDECAR_SYSLOGNG=1"
+    restart: always
+    networks:
+      - net
+
+  # ── SNMPTrapd 5.9.4 ─────────────────────────────────────────────────────────
+  snmptrapd:
+    image: librenms/librenms:26.2.0
+#    container_name: librenms_snmptrapd
+    hostname: librenms-snmptrapd
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      - librenms
+    ports:
+      - target: 162
+        published: 162
+        protocol: tcp
+      - target: 162
+        published: 162
+        protocol: udp
+    volumes:
+      - "./data/librenms:/data"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=${MYSQL_HOST}"
+      - "DB_NAME=${MYSQL_DATABASE}"
+      - "DB_USER=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "SIDECAR_SNMPTRAPD=1"
+    restart: always
+    networks:
+      - net
+
+# ── Réseau ────────────────────────────────────────────────────────────────────
+# Nom "net" conservé identique à la prod
+# Subnet 10.200.0.0/24 : seule divergence réseau acceptée
+#   → évite chevauchement 192.168.10.0/24 (prod) / 172.28.0.0/24 (prod)
+#                         192.168.98.0/24 (K8s test) / 172.17.0.0/16 (Docker)
+networks:
+  net:
+    driver: "bridge"
+    ipam:
+      config:
+        - subnet: 10.200.0.0/24
