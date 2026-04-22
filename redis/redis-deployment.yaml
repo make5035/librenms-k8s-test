@@ -1,9 +1,24 @@
-# redis.yaml
+# ==============================================================================
+# redis/redis-deployment.yaml
+# Redis 5.0.14 — Queue backend pollers LibreNMS
+# ==============================================================================
+# CORRECTION v2 : image redis:7 → redis:5.0-alpine (version prod validée 5.0.14)
+# Ajouts v2 :
+#   - livenessProbe / readinessProbe (redis-cli ping)
+#   - PersistentVolumeClaim pour persistance AOF (évite perte de queue au redémarrage)
+#   - Commande redis-server avec appendonly yes (durabilité queue pollers)
+#   - resources alignés sur consommation prod (12 Mo mesurés → marge confortable)
+# ==============================================================================
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: redis
   namespace: librenms
+  labels:
+    app: redis
+    component: queue
+    version: "5.0.14"
 spec:
   replicas: 1
   selector:
@@ -13,18 +28,87 @@ spec:
     metadata:
       labels:
         app: redis
+        component: queue
     spec:
       containers:
       - name: redis
-        image: redis:7
+        image: redis:5.0-alpine
+        imagePullPolicy: IfNotPresent
+        command:
+        - redis-server
+        - "--appendonly"
+        - "yes"
+        - "--appendfsync"
+        - "everysec"
+        ports:
+        - containerPort: 6379
+          name: redis
+        env:
+        - name: TZ
+          value: "Europe/Paris"
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 20
+          periodSeconds: 20
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "64Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: redis-data-pvc
+
 ---
+# Service Redis — ClusterIP (accès interne uniquement)
 apiVersion: v1
 kind: Service
 metadata:
   name: redis
   namespace: librenms
+  labels:
+    app: redis
 spec:
   selector:
     app: redis
   ports:
-    - port: 6379
+  - name: redis
+    port: 6379
+    targetPort: 6379
+  type: ClusterIP
+
+---
+# PVC Redis — persistance queue (AOF)
+# RWO suffisant : un seul pod Redis
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data-pvc
+  namespace: librenms
+  labels:
+    app: redis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 5Gi

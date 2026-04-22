@@ -1,19 +1,60 @@
+# ==============================================================================
+# librenms/hpa-librenms-poller.yaml
+# HorizontalPodAutoscaler — LibreNMS Pollers
+# ==============================================================================
+# Pré-requis : metrics-server installé sur le cluster
+#   kubectl top nodes  → doit retourner des métriques
+#
+# Dimensionnement production validé :
+#   6 536 devices / ~1 000 devices par poller = 7 pollers minimum
+#   replicas min : 3 (tolérance panne 1 nœud worker)
+#   replicas max : 10 (marge pour pics de polling)
+#
+# Changelog v2 :
+#   - minReplicas aligné sur dimensionnement prod (2 → 3)
+#   - Ajout metric memory en complément CPU
+#   - scaleDown stabilizationWindowSeconds augmenté (évite oscillations)
+# ==============================================================================
+
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: librenms-poller-hpa
   namespace: librenms
+  labels:
+    app: librenms-poller
+    component: poller
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: StatefulSet
     name: librenms-poller
-  minReplicas: 2
-  maxReplicas: 6
+  minReplicas: 3
+  maxReplicas: 10
   metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+    scaleDown:
+      # Fenêtre large : évite de tuer des pollers en cours de cycle SNMP
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 120

@@ -1,18 +1,45 @@
+# ==============================================================================
+# librenms/ingress-librenms.yaml
+# Ingress NGINX — LibreNMS Web Interface
+# ==============================================================================
+# Pré-requis : NGINX Ingress Controller déployé (ingress/nginx-deploy.yaml)
+#
+# Changelog v2 :
+#   - Annotations proxy-body-size et proxy timeouts ajoutés
+#     (nécessaires pour les uploads de MIBs et les longues requêtes API)
+#   - proxy-read-timeout augmenté (graphes RRD longs à générer)
+#   - Annotation TLS ready (décommenter + Secret TLS pour activer HTTPS)
+# ==============================================================================
+
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: librenms-ingress
   namespace: librenms
+  labels:
+    app: librenms
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    # Décommenter pour HTTPS (requiert Secret TLS librenms-tls)
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
   ingressClassName: nginx
   rules:
-    - host: librenms.local
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: librenms
-                port:
-                  number: 80
+  - host: librenms.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: librenms
+            port:
+              number: 80
+  # Décommenter pour TLS
+  # tls:
+  # - hosts:
+  #   - librenms.local
+  #   secretName: librenms-tls

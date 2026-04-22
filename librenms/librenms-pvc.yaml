@@ -1,0 +1,68 @@
+# ==============================================================================
+# librenms/librenms-pvc.yaml
+# PersistentVolumeClaims — LibreNMS
+# ==============================================================================
+# PVC principal : données LibreNMS (/data) incluant weathermap/images et configs
+# PVC weathermap-output : répertoire output généré par le plugin Weathermap
+# PVC menu : custom.blade.php (menu personnalisé actif en production)
+#
+# Pré-requis : StorageClass nfs-client disponible et définie comme default
+# (validée lors de l'installation K8s — kubectl get storageclass)
+# ==============================================================================
+
+---
+# PVC principal LibreNMS — /data (configs, logs, weathermap/images, rrd local)
+# RWX requis : accès simultané par les pods frontend (replicas: 2)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: librenms-data-pvc
+  namespace: librenms
+  labels:
+    app: librenms
+    component: storage
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+# PVC weathermap output — images générées par le cron Weathermap (*/1 * * * *)
+# RWX requis : le frontend et le scheduler écrivent dans ce répertoire
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: librenms-weathermap-output-pvc
+  namespace: librenms
+  labels:
+    app: librenms
+    component: weathermap
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+# PVC menu custom — custom.blade.php (présent et actif en production)
+# RWO suffisant : fichier statique, modifié uniquement par l'admin
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: librenms-menu-pvc
+  namespace: librenms
+  labels:
+    app: librenms
+    component: menu
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 1Gi

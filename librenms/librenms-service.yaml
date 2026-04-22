@@ -1,13 +1,25 @@
+# ==============================================================================
+# librenms/librenms-service.yaml
+# Service LibreNMS Frontend — ClusterIP
+# ==============================================================================
+# Expose le Deployment librenms en interne au cluster.
+# L'accès externe est géré par l'Ingress NGINX (ingress-librenms.yaml).
+# ==============================================================================
+
 apiVersion: v1
 kind: Service
 metadata:
   name: librenms
   namespace: librenms
+  labels:
+    app: librenms
+    component: frontend
 spec:
   selector:
     app: librenms
   ports:
-    - port: 80
-      targetPort: 8000
-      nodePort: 30007
-  type: NodePort
+  - name: http
+    port: 80
+    targetPort: 8000
+    protocol: TCP
+  type: ClusterIP

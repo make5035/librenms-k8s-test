@@ -1,0 +1,60 @@
+# ==============================================================================
+# argocd/librenms-app.yaml
+# ArgoCD Application — LibreNMS stack complète
+# ==============================================================================
+# NOUVEAU fichier v2
+#
+# Déploie en mode GitOps l'ensemble des manifests du repo.
+# ArgoCD surveille le repo Git et applique tout changement automatiquement.
+#
+# Pré-requis :
+#   - ArgoCD installé (argocd/install/install.yaml)
+#   - Repo GitHub accessible depuis le cluster
+#   - kubectl apply -f argocd/librenms-app.yaml -n argocd
+#
+# Sync policy : manuelle par défaut (selfHeal: false)
+# Passer selfHeal: true et automated.enabled: true en production validée
+# ==============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: librenms
+  namespace: argocd
+  labels:
+    app: librenms
+spec:
+  project: default
+  source:
+    # ⚠ Adapter l'URL et la branche selon le repo réel
+    repoURL: https://github.com/make5035/librenms-k8s-test
+    targetRevision: main
+    # path : répertoire racine des manifests K8s dans le repo
+    # ArgoCD appliquera tous les YAML de manière récursive
+    path: .
+    directory:
+      recurse: true
+      exclude: |
+        docker/**
+        external/mariadb/**
+        external/rrdcached/**
+        external/README.md
+        migration/**
+        README.md
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: librenms
+  syncPolicy:
+    # Sync manuelle — passer à automated après validation complète
+    # automated:
+    #   prune: true
+    #   selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

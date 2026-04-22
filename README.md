@@ -1,247 +1,212 @@
 # LibreNMS — Migration Docker Compose → Kubernetes
 
-Dépôt de travail pour la migration de l'infrastructure de supervision **LibreNMS** depuis un environnement Docker Compose de production vers un cluster Kubernetes de test.
+Dépôt de travail pour la migration de l'infrastructure de supervision **LibreNMS**
+depuis Docker Compose de production vers un cluster Kubernetes.
 
 ---
 
 ## Contexte
 
-L'infrastructure de supervision actuelle tourne en production sous Docker Compose et supervise plusieurs milliers d'équipements réseau via SNMP v2c. L'objectif de ce projet est de reproduire fidèlement cet environnement dans un cluster Kubernetes de test, valider la migration des données (base de données MariaDB + fichiers RRD), puis préparer un déploiement K8s production-ready.
+- **6 536 équipements** supervisés via SNMP v2c
+- Infrastructure actuelle : Docker Compose sur serveur physique
+- Cible : cluster Kubernetes bare metal (production) / VMs VMware (test)
 
-**Ce repo ne contient aucune donnée de production.** Les secrets sont chiffrés via SOPS ou fournis sous forme de templates `.example`.
+**Ce repo ne contient aucune donnée de production.** Les secrets sont chiffrés via SOPS.
 
 ---
 
-## Environnement
+## Environnements
 
 | Environnement | Infrastructure | Réseau |
 |---|---|---|
-| Production | Docker Compose (serveur physique) | LAN interne |
-| Test Docker | VM VMware Workstation | VMnet8 NAT — `192.168.98.0/24` |
-| Test K8s | Cluster multi-nœuds VMware Workstation | VMnet8 NAT — `192.168.98.0/24` |
+| Production Docker Compose | Serveur physique | LAN entreprise |
+| Test Docker | VM VMware — `192.168.98.134` | VMnet8 NAT `192.168.98.0/24` |
+| Test K8s | Cluster VMs VMware | VMnet8 NAT `192.168.98.0/24` |
+| Production K8s cible | Bare metal dédié | LAN physique entreprise |
+
+### Nœuds cluster K8s test
+
+| Rôle | IP |
+|---|---|
+| Control Plane (cp1) | 192.168.98.128 |
+| Worker 1 (w1) | 192.168.98.129 |
+| Worker 2 (w2) | 192.168.98.130 |
+| Worker 3 (w3) | 192.168.98.132 |
+| VM DB externe (MariaDB + RRDcached) | 192.168.98.131 |
+| VM Docker test | 192.168.98.134 |
 
 ---
 
-## Versions du stack supervisé
+## Versions du stack
 
-| Composant | Version | Image Docker |
-|---|---|---|
-| LibreNMS | 26.2.0 | `librenms/librenms:26.2.0` |
-| PHP | 8.3.x | inclus dans l'image LibreNMS |
-| MariaDB | 10.5.29 | `mariadb:10.5` |
-| Redis | 5.0.14 | `redis:5.0-alpine` |
-| Memcached | 1.6.41 | `memcached:1.6.41` |
-| RRDcached | 1.9.0 | `crazymax/rrdcached:1.9.0` |
-| syslog-ng | 4.8.3 | inclus dans l'image LibreNMS |
-| snmptrapd | 5.9.4 | inclus dans l'image LibreNMS |
+| Composant | Version | Image Docker | Localisation |
+|---|---|---|---|
+| LibreNMS | 26.2.0 | `librenms/librenms:26.2.0` | Cluster K8s |
+| PHP | 8.3.29 | inclus dans LibreNMS | Cluster K8s |
+| Zend Engine | 4.3.29 | inclus dans LibreNMS | Cluster K8s |
+| syslog-ng | 4.8.3 | inclus dans LibreNMS | Cluster K8s |
+| snmptrapd | 5.9.4 | inclus dans LibreNMS | Cluster K8s |
+| MariaDB | 10.5.29 | `mariadb:10.5` | **VM externe** |
+| Redis | 5.0.14 | `redis:5.0-alpine` | Cluster K8s |
+| Memcached | 1.6.41 | `memcached:1.6.41` | Cluster K8s |
+| RRDcached | 1.9.0 | `crazymax/rrdcached:1.9.0` | **VM externe** |
 
 ---
 
-## Arborescence du repo
+## Arborescence
 
 ```
 librenms-k8s/
 │
-├── README.md                          ← ce fichier
+├── README.md
 ├── .gitignore
-├── .sops.yaml                         ← configuration chiffrement SOPS
+├── .sops.yaml
 │
-├── docker/                            ← environnement de test Docker Compose
-│   ├── README.md                      ← procédure de démarrage détaillée
-│   ├── .env.example                   ← template variables d'environnement
-│   ├── librenms.env.example           ← template configuration LibreNMS
-│   ├── docker-compose-strict.yml      ← réplique fidèle de la prod (versions épinglées)
-│   └── docker-compose-improved.yml    ← améliorations documentées (healthchecks, etc.)
+├── docker/                              ← Stack Docker Compose de test
+│   ├── README.md
+│   ├── .env.example
+│   ├── librenms.env.example
+│   ├── docker-compose-strict.yml        ← Réplique fidèle prod (versions épinglées)
+│   └── docker-compose-improved.yml      ← Améliorations (healthchecks, probes)
 │
-├── migration/                         ← scripts de migration Docker → K8s
-│   ├── README.md                      ← plan de migration étape par étape
-│   ├── 01-flush-rrdcached.sh          ← flush du cache RRD avant copie
-│   ├── 02-dump-mariadb.sh             ← export de la base de données
-│   ├── 03-import-mariadb.sh           ← import vers K8s
-│   └── 04-rsync-rrd.sh                ← copie des fichiers RRD vers PVC
-│
-├── argocd/                            ← déploiement ArgoCD
-│   └── install/
-│       └── install.yaml
-│
-├── ingress/                           ← contrôleur Ingress NGINX
-│   ├── argocd-ingress.yaml
-│   └── nginx-deploy.yaml
-│
-├── librenms/                          ← manifests Kubernetes LibreNMS
-│   ├── librenms-deployment.yaml       ← frontend web
-│   ├── librenms-service.yaml
-│   ├── ingress-librenms.yaml
-│   ├── statefulset-librenms-poller.yaml  ← pollers SNMP scalables
-│   ├── service-librenms-poller.yaml
-│   ├── hpa-librenms-poller.yaml       ← autoscaling horizontal des pollers
-│   └── librenms-poller-secret.yaml
-│
-├── metallb/                           ← LoadBalancer MetalLB
-│   ├── deploy-metallb.yaml
-│   ├── ip-pool-metallb.yaml
-│   └── namespace-metallb.yaml
-│
-├── namespaces/                        ← namespaces Kubernetes
+├── namespaces/
 │   ├── librenms-namespace.yaml
 │   └── argocd-namespace.yaml
 │
-├── redis/                             ← déploiement Redis
-│   └── redis-deployment.yaml
+├── secrets/                             ← Chiffrés SOPS — jamais en clair
+│   └── librenms-secret.yaml
 │
-└── secrets/                           ← secrets Kubernetes (chiffrés SOPS)
-    └── librenms-secret.yaml
+├── librenms/
+│   ├── librenms-deployment.yaml         ← Frontend web (2 replicas)
+│   ├── librenms-service.yaml
+│   ├── librenms-pvc.yaml                ← PVCs : data, weathermap-output, menu
+│   ├── ingress-librenms.yaml
+│   ├── statefulset-librenms-poller.yaml ← Pollers SNMP (scalables, HPA)
+│   ├── service-librenms-poller.yaml     ← Headless service StatefulSet
+│   ├── hpa-librenms-poller.yaml         ← Autoscaling 3→10 replicas
+│   └── librenms-poller-secret.yaml      ← Chiffré SOPS
+│
+├── redis/
+│   └── redis-deployment.yaml            ← Redis 5.0.14 + PVC AOF + Service
+│
+# memcached retiré
+│   └── memcached-deployment.yaml        ← Memcached 1.6.41 + Service
+│
+├── syslogng/
+│   └── syslogng-deployment.yaml         ← syslog-ng 4.8.3 + Services MetalLB TCP/UDP
+│
+├── snmptrapd/
+│   └── snmptrapd-deployment.yaml        ← snmptrapd 5.9.4 + Services MetalLB TCP/UDP
+│
+├── metallb/
+│   ├── namespace-metallb.yaml
+│   ├── ip-pool-metallb.yaml             ← Pool 192.168.98.200-210
+│   └── deploy-metallb.yaml              ← (lien vers install Helm)
+│
+├── ingress/
+│   ├── nginx-deploy.yaml                ← Helm values NGINX Ingress
+│   └── argocd-ingress.yaml
+│
+├── argocd/
+│   ├── install/
+│   │   └── install.yaml
+│   └── librenms-app.yaml                ← Application ArgoCD GitOps
+│
+├── external/                            ← Services hors cluster (non gérés K8s)
+│   ├── README.md
+│   ├── k8s-services/
+│   │   └── external-services.yaml       ← Endpoints + Services MariaDB/RRDcached
+│   ├── mariadb/
+│   │   ├── 50-server.cnf                ← Config versionnée
+│   │   └── install.sh                   ← Installation reproductible
+│   └── rrdcached/
+│       └── install.sh                   ← Installation reproductible
+│
+└── migration/
+    ├── README.md
+    ├── 01-flush-rrdcached.sh
+    ├── 02-dump-mariadb.sh
+    ├── 03-import-mariadb.sh
+    └── 04-rsync-rrd.sh
 ```
 
 ---
 
-## Démarrage rapide
+## IPs MetalLB réservées (environnement test)
 
-### Prérequis
+| IP | Service | Port(s) |
+|---|---|---|
+| 192.168.98.200 | NGINX Ingress (LibreNMS web + ArgoCD) | 80, 443 |
+| 192.168.98.201 | syslog-ng | 514/TCP + 514/UDP |
+| 192.168.98.202 | snmptrapd | 162/TCP + 162/UDP |
+| 192.168.98.203-210 | Réservé | — |
 
-- Docker + Docker Compose v2 installés sur la VM de test Docker
-- Accès réseau à `192.168.98.0/24` (cluster K8s) depuis la VM Docker
-- `kubectl` configuré sur la VM K8s
-- `git` installé sur les deux VMs
+---
 
-### Cloner le repo
-
-```bash
-git clone https://github.com/make5035/librenms-k8s.git
-cd librenms-k8s
-```
-
-### Démarrer l'environnement Docker de test
-
-Depuis la **VM Docker** :
+## Ordre de déploiement
 
 ```bash
-cd docker/
-
-# Créer les répertoires de données locaux (jamais versionnés)
-mkdir -p data/{db,librenms,rrdcached/{db,journal}}
-
-# Préparer les fichiers de configuration
-cp .env.example .env
-cp librenms.env.example librenms.env
-
-# Adapter les valeurs (credentials, timezone, PUID/PGID)
-vi .env
-vi librenms.env
-
-# Démarrer les backends en premier
-docker compose -f docker-compose-strict.yml up -d mariadb redis memcached rrdcached
-
-# Attendre que MariaDB soit prêt (vérifier le statut)
-docker compose -f docker-compose-strict.yml ps
-
-# Démarrer le frontend
-docker compose -f docker-compose-strict.yml up -d librenms
-
-# Démarrer les sidecars
-docker compose -f docker-compose-strict.yml up -d syslogng snmptrapd
-```
-
-Interface web accessible sur : `http://<IP-VM-DOCKER>:8000`
-
-### Appliquer les manifests Kubernetes
-
-Depuis la **VM K8s** :
-
-```bash
-cd librenms-k8s/
-
-# Namespaces
+# 1. Namespaces
 kubectl apply -f namespaces/
 
-# MetalLB
-kubectl apply -f metallb/
+# 2. MetalLB (déjà installé via Helm — appliquer uniquement le pool)
+kubectl apply -f metallb/ip-pool-metallb.yaml
 
-# Ingress NGINX
-kubectl apply -f ingress/
-
-# ArgoCD
-kubectl apply -f argocd/install/install.yaml
-kubectl apply -f ingress/argocd-ingress.yaml
-
-# LibreNMS
+# 3. Secrets (après chiffrement SOPS)
 kubectl apply -f secrets/
+kubectl apply -f librenms/librenms-poller-secret.yaml
+
+# 4. PVCs
+kubectl apply -f librenms/librenms-pvc.yaml
+kubectl apply -f redis/redis-deployment.yaml   # PVC Redis inclus
+
+# 5. Services externes (Endpoints MariaDB + RRDcached)
+kubectl apply -f external/k8s-services/
+
+# 6. Backends
 kubectl apply -f redis/
-kubectl apply -f librenms/
+kubectl apply -f memcached/
+
+# 7. Application LibreNMS
+kubectl apply -f librenms/librenms-deployment.yaml
+kubectl apply -f librenms/librenms-service.yaml
+kubectl apply -f librenms/ingress-librenms.yaml
+
+# 8. Pollers
+kubectl apply -f librenms/statefulset-librenms-poller.yaml
+kubectl apply -f librenms/service-librenms-poller.yaml
+kubectl apply -f librenms/hpa-librenms-poller.yaml
+
+# 9. Sidecars réseau
+kubectl apply -f syslogng/
+kubectl apply -f snmptrapd/
+
+# 10. Vérification globale
+kubectl get all -n librenms
+kubectl get pvc -n librenms
+kubectl get ingress -n librenms
 ```
-
----
-
-## Plan de migration
-
-La migration des données s'effectue en deux temps, **après** une période de validation de l'environnement Docker de test.
-
-```
-Phase 1 — Validation (quelques jours)
-  └── Stack Docker de test opérationnelle
-  └── Polling SNMP fonctionnel
-  └── Graphes RRD générés correctement
-  └── Syslog et traps SNMP reçus
-
-Phase 2 — Migration des données
-  ├── 1. Flush RRDcached (scripts/01-flush-rrdcached.sh)
-  ├── 2. Export MariaDB  (scripts/02-dump-mariadb.sh)
-  ├── 3. Import MariaDB  (scripts/03-import-mariadb.sh)
-  └── 4. Copie RRD       (scripts/04-rsync-rrd.sh)
-
-Phase 3 — Bascule
-  └── Vérification des graphes et du polling sur K8s
-  └── Validation des alertes et syslog
-  └── Arrêt de la stack Docker de test
-```
-
-Voir [`migration/README.md`](migration/README.md) pour la procédure détaillée étape par étape.
 
 ---
 
 ## Sécurité
 
-- Les fichiers `.env` et `librenms.env` ne sont **jamais committés** (listés dans `.gitignore`)
-- Seuls les fichiers `.env.example` et `librenms.env.example` sont versionnés
-- Les secrets Kubernetes sont chiffrés via **SOPS** (voir `.sops.yaml`)
-- Le répertoire `docker/data/` est exclu du versionning (données locales)
-- Aucun certificat (`.cer`, `.crt`, `.key`, `.pem`) n'est versionné
+- Fichiers `.env` et `librenms.env` exclus du versionnement (`.gitignore`)
+- Secrets chiffrés via **SOPS + age** avant tout commit
+- Répertoire `docker/data/` exclu (données locales)
+- Aucun certificat (`.cer`, `.crt`, `.key`, `.pem`) versionné
 
 ---
 
-## Réseau
+## Données RRD production (référence dimensionnement)
 
-```
-VMware Workstation — VMnet8 (NAT)
-┌─────────────────────────────────────────────────────┐
-│  192.168.98.0/24                                    │
-│                                                     │
-│  ┌──────────────┐     ┌─────────────────────────┐  │
-│  │  VM Docker   │     │  Cluster K8s (3 nœuds)  │  │
-│  │  .xx         │◄───►│  .x  master             │  │
-│  │              │     │  .x  worker-1           │  │
-│  └──────────────┘     │  .x  worker-2           │  │
-│                        └─────────────────────────┘  │
-│                                                     │
-│  NAT sortant → LAN physique → équipements SNMP      │
-└─────────────────────────────────────────────────────┘
-
-Réseau interne Docker Compose : 10.200.0.0/24
-  (isolé — pas de chevauchement avec K8s ni production)
-```
-
----
-
-## Ports exposés (VM Docker)
-
-| Port | Protocole | Service | Usage |
-|---|---|---|---|
-| 8000 | TCP | LibreNMS web | Interface d'administration |
-| 3306 | TCP | MariaDB | Migration DB → K8s |
-| 42217 | TCP | RRDcached | Migration RRD → K8s |
-| 6379 | TCP | Redis | Debug / inspection |
-| 514 | TCP+UDP | syslog-ng | Réception syslog réseau |
-| 162 | TCP+UDP | snmptrapd | Réception traps SNMP |
+| Métrique | Valeur |
+|---|---|
+| Devices actifs | 6 536 |
+| Fichiers .rrd | 592 289 |
+| Dossiers | 7 701 (dont 1 165 orphelins) |
+| Volume total | 664 Go |
+| Plus gros device | invnms-pxg01 — 25 Go |
 
 ---
 
@@ -249,16 +214,19 @@ Réseau interne Docker Compose : 10.200.0.0/24
 
 - [x] Stack Docker Compose de test (versions épinglées)
 - [x] Namespace LibreNMS K8s
-- [x] Déploiement Redis K8s
-- [x] Déploiement LibreNMS frontend K8s
-- [x] StatefulSet pollers K8s (scalable)
-- [x] HPA pollers K8s
-- [x] MetalLB LoadBalancer
-- [x] Ingress NGINX
-- [x] ArgoCD
-- [ ] MariaDB StatefulSet K8s
-- [ ] RRDcached Deployment K8s
-- [ ] Memcached Deployment K8s
-- [ ] Scripts de migration finalisés
-- [ ] Migration des données effectuée
+- [x] Redis Deployment K8s (5.0.14 — corrigé v2)
+- [ ] Memcached — NON déployé (inactif en prod, CACHE_DRIVER=redis)
+- [x] LibreNMS frontend Deployment K8s (v2 — weathermap + menu custom)
+- [x] StatefulSet pollers K8s (v2 — RRDCACHED_SERVER + MIBs)
+- [x] HPA pollers K8s (v2 — minReplicas 3, metric mémoire)
+- [x] MetalLB LoadBalancer (v2 — IPs documentées)
+- [x] Ingress NGINX (v2 — timeouts, ssl-passthrough ArgoCD)
+- [x] ArgoCD Application manifest (nouveau)
+- [x] syslog-ng Deployment K8s (nouveau)
+- [x] snmptrapd Deployment K8s (nouveau)
+- [x] PVCs LibreNMS (nouveau — data, weathermap-output, menu)
+- [x] Services externes MariaDB + RRDcached (Endpoints K8s)
+- [x] Scripts install MariaDB + RRDcached reproductibles
+- [ ] Migration données effectuée (DB + RRD)
 - [ ] Validation complète sur K8s
+- [ ] Basculement production

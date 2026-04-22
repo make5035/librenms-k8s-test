@@ -1,0 +1,15 @@
+# ==============================================================================
+# external/mariadb/50-server.cnf
+# Configuration MariaDB 10.5.29 — identique à la production Docker Compose
+# Chemin sur VM : /etc/mysql/mariadb.conf.d/50-server.cnf
+# ==============================================================================
+
+[mysqld]
+innodb_file_per_table    = 1
+lower_case_table_names   = 0
+character-set-server     = utf8mb4
+collation-server         = utf8mb4_unicode_ci
+max_connections          = 1000
+# bind-address : adapter à l'IP de la VM DB
+# Exemple : bind-address = 192.168.98.131
+bind-address             = 0.0.0.0

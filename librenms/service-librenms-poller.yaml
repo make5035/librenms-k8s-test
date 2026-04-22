@@ -1,9 +1,30 @@
+# ==============================================================================
+# librenms/service-librenms-poller.yaml
+# Service Headless — LibreNMS Pollers (StatefulSet)
+# ==============================================================================
+# Un Service headless (clusterIP: None) est requis par le StatefulSet pour
+# garantir un nom DNS stable par pod :
+#   librenms-poller-0.librenms-poller.librenms.svc.cluster.local
+#   librenms-poller-1.librenms-poller.librenms.svc.cluster.local
+#
+# Le dispatcher utilise DISPATCHER_NODE_ID = metadata.name (nom du pod)
+# comme identifiant unique dans la table des pollers LibreNMS.
+# ==============================================================================
+
 apiVersion: v1
 kind: Service
 metadata:
   name: librenms-poller
   namespace: librenms
+  labels:
+    app: librenms-poller
+    component: poller
 spec:
-  clusterIP: None
   selector:
     app: librenms-poller
+  clusterIP: None
+  ports:
+  - name: dispatcher
+    port: 8000
+    targetPort: 8000
+    protocol: TCP

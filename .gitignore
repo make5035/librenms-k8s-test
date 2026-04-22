@@ -1,24 +1,43 @@
-# === SECRETS — ne jamais committer ===
+# ==============================================================================
+# .gitignore — librenms-k8s
+# ==============================================================================
+
+# Secrets — jamais en clair dans le repo
 .env
 *.env
-!*.env.example          # exception : les templates sont versionnés
+!*.env.example
 librenms.env
 !librenms.env.example
 
-# === DONNÉES LOCALES DOCKER — potentiellement des centaines de Go ===
+# Données locales Docker Compose test
 docker/data/
 
-# === FICHIERS SYSTÈME ===
-.DS_Store
-Thumbs.db
-*~
-*.swp
-
-# === CERTIFICATS ===
+# Certificats et clés
 *.cer
 *.crt
 *.key
 *.pem
+*.p12
+*.pfx
 
-# === LOGS ===
+# Logs
 *.log
+
+# Fichiers temporaires
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+
+# Secrets K8s non chiffrés (les .enc.yaml sont autorisés)
+secrets/librenms-secret.yaml
+librenms/librenms-poller-secret.yaml
+# Autoriser les versions chiffrées SOPS
+!secrets/*.enc.yaml
+!librenms/*.enc.yaml
+
+# Sauvegardes locales
+*.bak
+*.backup
+dump_*.sql

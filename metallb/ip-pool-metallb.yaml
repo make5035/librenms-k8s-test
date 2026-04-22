@@ -1,11 +1,33 @@
+# ==============================================================================
+# metallb/ip-pool-metallb.yaml
+# MetalLB — Pool d'adresses IP + L2Advertisement
+# ==============================================================================
+# Réseau test K8s : 192.168.98.0/24 (VMnet8 NAT VMware Workstation)
+# Réseau prod K8s  : à adapter selon LAN physique entreprise
+#
+# Changelog v2 :
+#   - Ajout commentaires sur les IPs réservées par service
+#   - Les IPs syslogng et snmptrapd doivent être fixes et documentées
+#     pour que les équipements réseau puissent les configurer comme cibles
+#
+# Plage recommandée test : 192.168.98.200 → 192.168.98.210
+#   .200 → librenms web (Ingress LoadBalancer si pas de NodePort)
+#   .201 → syslog-ng  TCP+UDP 514   (IP communiquée aux équipements réseau)
+#   .202 → snmptrapd  TCP+UDP 162   (IP communiquée aux équipements réseau)
+#   .203-.210 → réservé extensions futures
+# ==============================================================================
+
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
-  name: first-pool
+  name: librenms-pool
   namespace: metallb-system
 spec:
   addresses:
-    - 192.168.98.240-192.168.98.250
+  - 192.168.98.200-192.168.98.210
+  # autoAssign: true → MetalLB assigne automatiquement depuis ce pool
+  autoAssign: true
+
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
@@ -14,4 +36,4 @@ metadata:
   namespace: metallb-system
 spec:
   ipAddressPools:
-    - first-pool
+  - librenms-pool
