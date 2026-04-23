@@ -115,6 +115,7 @@ metadata:
     metallb.universe.tf/allow-shared-ip: "librenms-snmptrap"
 spec:
   type: LoadBalancer
+  loadBalancerIP: 192.168.98.242
   selector:
     app: librenms-snmptrapd
   ports:
@@ -136,6 +137,7 @@ metadata:
     metallb.universe.tf/allow-shared-ip: "librenms-snmptrap"
 spec:
   type: LoadBalancer
+  loadBalancerIP: 192.168.98.242
   selector:
     app: librenms-snmptrapd
   ports:

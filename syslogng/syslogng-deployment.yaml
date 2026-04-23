@@ -121,6 +121,7 @@ metadata:
     metallb.universe.tf/allow-shared-ip: "librenms-syslog"
 spec:
   type: LoadBalancer
+  loadBalancerIP: 192.168.98.241
   selector:
     app: librenms-syslogng
   ports:
@@ -142,6 +143,7 @@ metadata:
     metallb.universe.tf/allow-shared-ip: "librenms-syslog"
 spec:
   type: LoadBalancer
+  loadBalancerIP: 192.168.98.241
   selector:
     app: librenms-syslogng
   ports:
