@@ -23,3 +23,7 @@ spec:
     targetPort: 8000
     protocol: TCP
   type: ClusterIP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
