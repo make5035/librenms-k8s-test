@@ -10,11 +10,11 @@
 #   - Les IPs syslogng et snmptrapd doivent être fixes et documentées
 #     pour que les équipements réseau puissent les configurer comme cibles
 #
-# Plage recommandée test : 192.168.98.200 → 192.168.98.210
-#   .200 → librenms web (Ingress LoadBalancer si pas de NodePort)
-#   .201 → syslog-ng  TCP+UDP 514   (IP communiquée aux équipements réseau)
-#   .202 → snmptrapd  TCP+UDP 162   (IP communiquée aux équipements réseau)
-#   .203-.210 → réservé extensions futures
+# Plage recommandée test : 192.168.98.240 → 192.168.98.250
+#   .240 → librenms web (Ingress LoadBalancer si pas de NodePort)
+#   .241 → syslog-ng  TCP+UDP 514   (IP communiquée aux équipements réseau)
+#   .242 → snmptrapd  TCP+UDP 162   (IP communiquée aux équipements réseau)
+#   .243-.250 → réservé extensions futures
 # ==============================================================================
 
 apiVersion: metallb.io/v1beta1
@@ -24,7 +24,7 @@ metadata:
   namespace: metallb-system
 spec:
   addresses:
-  - 192.168.98.200-192.168.98.210
+  - 192.168.98.240-192.168.98.250
   # autoAssign: true → MetalLB assigne automatiquement depuis ce pool
   autoAssign: true
 
