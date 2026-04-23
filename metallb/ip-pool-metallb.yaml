@@ -1,31 +1,19 @@
 # ==============================================================================
 # metallb/ip-pool-metallb.yaml
-# MetalLB — Pool d'adresses IP + L2Advertisement
+# Pool unifié — remplace first-pool + librenms-pool
+#   .240 → ingress-nginx (librenms web + argocd)
+#   .241 → syslog-ng TCP+UDP 514
+#   .242 → snmptrapd TCP+UDP 162
+#   .243-.250 → réservé
 # ==============================================================================
-# Réseau test K8s : 192.168.98.0/24 (VMnet8 NAT VMware Workstation)
-# Réseau prod K8s  : à adapter selon LAN physique entreprise
-#
-# Changelog v2 :
-#   - Ajout commentaires sur les IPs réservées par service
-#   - Les IPs syslogng et snmptrapd doivent être fixes et documentées
-#     pour que les équipements réseau puissent les configurer comme cibles
-#
-# Plage recommandée test : 192.168.98.240 → 192.168.98.250
-#   .240 → librenms web (Ingress LoadBalancer si pas de NodePort)
-#   .241 → syslog-ng  TCP+UDP 514   (IP communiquée aux équipements réseau)
-#   .242 → snmptrapd  TCP+UDP 162   (IP communiquée aux équipements réseau)
-#   .243-.250 → réservé extensions futures
-# ==============================================================================
-
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
-  name: librenms-pool
+  name: first-pool
   namespace: metallb-system
 spec:
   addresses:
   - 192.168.98.240-192.168.98.250
-  # autoAssign: true → MetalLB assigne automatiquement depuis ce pool
   autoAssign: true
 
 ---
@@ -36,4 +24,4 @@ metadata:
   namespace: metallb-system
 spec:
   ipAddressPools:
-  - librenms-pool
+  - first-pool
