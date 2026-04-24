@@ -1,4 +1,11 @@
+# ==============================================================================
+# namespaces/librenms-namespace.yaml
+# ==============================================================================
+
 apiVersion: v1
 kind: Namespace
 metadata:
   name: librenms
+  labels:
+    name: librenms
+    managed-by: argocd

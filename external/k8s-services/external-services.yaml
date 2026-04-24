@@ -1,0 +1,88 @@
+# ==============================================================================
+# external/k8s-services/external-services.yaml
+# Services K8s pour les composants externes au cluster
+# ==============================================================================
+# MariaDB 10.5.29 et RRDcached 1.9.0 tournent sur la VM 192.168.98.131
+# Ces manifests créent une abstraction réseau K8s :
+#   - Les pods référencent "mariadb" et "rrdcached" par nom de Service
+#   - Le jour où ces services rentrent dans le cluster, seul le Service change
+#   - Aucune modification des Deployments/StatefulSets requise
+#
+# Mécanisme : Endpoints manuels (sans selector) → Service sans selector
+# Note : ExternalName ne supporte pas les IPs directement sur K8s < 1.26
+# ==============================================================================
+
+---
+# ── Endpoints MariaDB externe ──────────────────────────────────────────────────
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: mariadb-external
+  namespace: librenms
+  labels:
+    app: mariadb
+    location: external
+subsets:
+- addresses:
+  - ip: 192.168.98.131
+  ports:
+  - port: 3306
+    protocol: TCP
+
+---
+# ── Service MariaDB (sans selector → pointe sur Endpoints manuels) ─────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb-external
+  namespace: librenms
+  labels:
+    app: mariadb
+    location: external
+  annotations:
+    note: "MariaDB 10.5.29 — VM 192.168.98.131 externe au cluster"
+spec:
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: 3306
+    protocol: TCP
+  type: ClusterIP
+  # Pas de selector → Endpoints manuels utilisés
+
+---
+# ── Endpoints RRDcached externe ────────────────────────────────────────────────
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: rrdcached-external
+  namespace: librenms
+  labels:
+    app: rrdcached
+    location: external
+subsets:
+- addresses:
+  - ip: 192.168.98.131
+  ports:
+  - port: 42217
+    protocol: TCP
+
+---
+# ── Service RRDcached (sans selector → pointe sur Endpoints manuels) ──────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: rrdcached-external
+  namespace: librenms
+  labels:
+    app: rrdcached
+    location: external
+  annotations:
+    note: "RRDcached 1.9.0 — VM 192.168.98.131 externe au cluster"
+spec:
+  ports:
+  - name: rrdcached
+    port: 42217
+    targetPort: 42217
+    protocol: TCP
+  type: ClusterIP

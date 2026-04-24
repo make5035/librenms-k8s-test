@@ -1,10 +1,33 @@
+# ==============================================================================
+# librenms/librenms-deployment.yaml
+# LibreNMS Frontend Web — Deployment K8s
+# ==============================================================================
+# Version image : librenms/librenms:26.2.0
+#   PHP 8.3.29 / Zend Engine v4.3.29 / syslog-ng 4.8.3 / snmptrapd 5.9.4 inclus
+#
+# Changelog v4 :
+#   - Suppression MEMCACHED_HOST/PORT : Memcached non déployé (inactif en prod)
+#   - Weathermap plugin activé (LIBRENMS_WEATHERMAP=true + volumes subPath)
+#   - Menu custom monté (custom.blade.php actif en prod)
+#   - RRDCACHED_SERVER pointé sur VM externe (192.168.98.131:42217)
+#   - Variables PHP complètes depuis librenms.env prod
+#   - SNMP_EXTRA_MIB_DIRS (MIBs Fortinet)
+#   - readinessProbe / livenessProbe
+#   - securityContext capabilities NET_ADMIN/NET_RAW
+#   - initContainers : wait-for-redis — évite race condition DNS au démarrage
+# ==============================================================================
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: librenms
   namespace: librenms
+  labels:
+    app: librenms
+    component: frontend
+    version: "26.2.0"
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: librenms
@@ -12,18 +35,45 @@ spec:
     metadata:
       labels:
         app: librenms
+        component: frontend
     spec:
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+      - name: wait-for-redis
+        image: busybox:1.36
+        command:
+          - /bin/sh
+          - -c
+          - |
+            echo "Attente de Redis..."
+            until nc -z redis.librenms.svc.cluster.local 6379; do
+              echo "Redis non joignable, retry dans 2s..."
+              sleep 2
+            done
+            echo "Redis OK — démarrage LibreNMS"
       containers:
       - name: librenms
         image: librenms/librenms:26.2.0
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          capabilities:
+            add:
+              - NET_ADMIN
+              - NET_RAW
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
         env:
+        # ── Base de données externe (VM 192.168.98.131) ──────────────────────
         - name: DB_HOST
           value: "192.168.98.131"
         - name: DB_PORT
           value: "3306"
-        - name: DB_DATABASE
+        - name: DB_NAME
           value: "librenms"
-        - name: DB_USERNAME
+        - name: DB_USER
           valueFrom:
             secretKeyRef:
               name: librenms-secret
@@ -33,9 +83,98 @@ spec:
             secretKeyRef:
               name: librenms-secret
               key: db-password
+        - name: DB_TIMEOUT
+          value: "60"
+        # ── Redis interne cluster ────────────────────────────────────────────
         - name: REDIS_HOST
+          value: "redis.librenms.svc.cluster.local."
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_DB
+          value: "0"
+        - name: CACHE_DRIVER
           value: "redis"
+        - name: SESSION_DRIVER
+          value: "redis"
+        # ── RRDcached externe (VM 192.168.98.131) ────────────────────────────
         - name: RRDCACHED_SERVER
           value: "192.168.98.131:42217"
-        ports:
-        - containerPort: 8000
+        # ── PHP tuning (valeurs prod) ────────────────────────────────────────
+        - name: MEMORY_LIMIT
+          value: "256M"
+        - name: UPLOAD_MAX_SIZE
+          value: "16M"
+        - name: OPCACHE_MEM_SIZE
+          value: "128"
+        - name: REAL_IP_FROM
+          value: "0.0.0.0/32"
+        - name: REAL_IP_HEADER
+          value: "X-Forwarded-For"
+        - name: LOG_IP_VAR
+          value: "remote_addr"
+        - name: LISTEN_IPV6
+          value: "false"
+        # ── SNMP ─────────────────────────────────────────────────────────────
+        - name: LIBRENMS_SNMP_COMMUNITY
+          value: "librenmsdocker"
+        - name: SNMP_EXTRA_MIB_DIRS
+          value: "mibs/fortinet:mibs/fortinet/FORTINET-FORTIGATE-MIB"
+        # ── Weathermap (plugin actif en production) ──────────────────────────
+        - name: LIBRENMS_WEATHERMAP
+          value: "true"
+        - name: LIBRENMS_WEATHERMAP_SCHEDULE
+          value: "*/1 * * * *"
+        # ── Timezone / identité process ──────────────────────────────────────
+        - name: TZ
+          value: "Europe/Paris"
+        - name: PUID
+          value: "1000"
+        - name: PGID
+          value: "1000"
+        readinessProbe:
+          httpGet:
+            path: /login
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 10
+        livenessProbe:
+          httpGet:
+            path: /login
+            port: 8000
+          initialDelaySeconds: 180
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 5
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "2"
+            memory: "2Gi"
+        volumeMounts:
+        # /data principal — configs PHP, logs, alert-templates, .env...
+        - name: librenms-data
+          mountPath: /data
+        # Weathermap — cartes .conf + images custom (subPath dans PVC principal)
+        - name: librenms-data
+          mountPath: /opt/librenms/html/plugins/Weathermap
+          subPath: weathermap
+        # Weathermap output — images PNG générées par le cron
+        - name: weathermap-output
+          mountPath: /opt/librenms/html/plugins/Weathermap/output
+        # Menu personnalisé — custom.blade.php actif en production
+        - name: librenms-menu
+          mountPath: /opt/librenms/resources/views/menu
+      volumes:
+      - name: librenms-data
+        persistentVolumeClaim:
+          claimName: librenms-data-pvc
+      - name: weathermap-output
+        persistentVolumeClaim:
+          claimName: librenms-weathermap-output-pvc
+      - name: librenms-menu
+        persistentVolumeClaim:
+          claimName: librenms-menu-pvc

@@ -1,7 +1,10 @@
+# ==============================================================================
+# namespaces/argocd-namespace.yaml
+# ==============================================================================
+
 apiVersion: v1
 kind: Namespace
 metadata:
   name: argocd
   labels:
-    app: argocd
-    environment: test
+    name: argocd

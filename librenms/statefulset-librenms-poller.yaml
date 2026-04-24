@@ -1,8 +1,28 @@
+# ==============================================================================
+# librenms/statefulset-librenms-poller.yaml
+# LibreNMS Pollers/Dispatchers — StatefulSet K8s
+# ==============================================================================
+# Version image : librenms/librenms:26.2.0
+#
+# Changelog v2 :
+#   - RRDCACHED_SERVER ajouté (VM externe 192.168.98.131:42217)
+#   - MEMCACHED_HOST ajouté (conformité prod)
+#   - REDIS_SCHEME / REDIS_PASSWORD alignés sur docker_compose_poller.yml prod
+#   - SNMP_EXTRA_MIB_DIRS ajouté (MIBs Fortinet)
+#   - Volume librenms-data monté RWX (weathermap/images partagé avec frontend)
+#   - initContainer corrigé — cat heredoc sans indentation pour bash
+#   - DB_TIMEOUT ajouté
+# ==============================================================================
+
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: librenms-poller
   namespace: librenms
+  labels:
+    app: librenms-poller
+    component: poller
+    version: "26.2.0"
 spec:
   serviceName: librenms-poller
   replicas: 2
@@ -13,119 +33,161 @@ spec:
     metadata:
       labels:
         app: librenms-poller
+        component: poller
     spec:
+      securityContext:
+        fsGroup: 1000
+      # ── initContainer : génère /data/.env pour le dispatcher ───────────────
       initContainers:
-        - name: generate-env
-          image: busybox:1.36
-          command:
-            - /bin/sh
-            - -c
-            - |
-              cat > /data/.env <<EOF
-              APP_KEY=${APP_KEY}
-              DB_HOST=${DB_HOST}
-              DB_DATABASE=${DB_NAME}
-              DB_USERNAME=${DB_USER}
-              DB_PASSWORD=${DB_PASSWORD}
-              REDIS_HOST=${REDIS_HOST}
-              REDIS_PORT=${REDIS_PORT}
-              EOF
-          env:
-            - name: APP_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: librenms-poller-secret
-                  key: APP_KEY
-            - name: DB_HOST
-              valueFrom:
-                secretKeyRef:
-                  name: librenms-poller-secret
-                  key: DB_HOST
-            - name: DB_NAME
-              valueFrom:
-                secretKeyRef:
-                  name: librenms-poller-secret
-                  key: DB_NAME
-            - name: DB_USER
-              valueFrom:
-                secretKeyRef:
-                  name: librenms-poller-secret
-                  key: DB_USER
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: librenms-poller-secret
-                  key: DB_PASSWORD
-            - name: REDIS_HOST
-              valueFrom:
-                secretKeyRef:
-                  name: librenms-poller-secret
-                  key: REDIS_HOST
-            - name: REDIS_PORT
-              valueFrom:
-                secretKeyRef:
-                  name: librenms-poller-secret
-                  key: REDIS_PORT
-          volumeMounts:
-            - name: poller-data
-              mountPath: /data
-      containers:
-        - name: dispatcher
-          image: librenms/librenms:26.2.0
-          imagePullPolicy: IfNotPresent
-          env:
-            - name: TZ
-              value: "Europe/Paris"
-            - name: SIDECAR_DISPATCHER
-              value: "1"
-            - name: DISPATCHER_NODE_ID
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: DB_HOST
-              valueFrom:
-                secretKeyRef:
-                  name: librenms-poller-secret
-                  key: DB_HOST
-            - name: DB_NAME
-              valueFrom:
-                secretKeyRef:
-                  name: librenms-poller-secret
-                  key: DB_NAME
-            - name: DB_USER
-              valueFrom:
-                secretKeyRef:
-                  name: librenms-poller-secret
-                  key: DB_USER
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: librenms-poller-secret
-                  key: DB_PASSWORD
-            - name: REDIS_HOST
-              valueFrom:
-                secretKeyRef:
-                  name: librenms-poller-secret
-                  key: REDIS_HOST
-            - name: REDIS_PORT
-              valueFrom:
-                secretKeyRef:
-                  name: librenms-poller-secret
-                  key: REDIS_PORT
-            - name: REDIS_DB
-              value: "0"
-            - name: REDIS_SCHEME
-              value: "tcp"
-          resources:
-            requests:
-              cpu: "250m"
-              memory: "512Mi"
-            limits:
-              cpu: "2"
-              memory: "2Gi"
-          volumeMounts:
-            - name: poller-data
-              mountPath: /data
-      volumes:
+      - name: generate-env
+        image: busybox:1.36
+        command:
+        - /bin/sh
+        - -c
+        - |
+          cat > /data/.env <<EOF
+          APP_KEY=${APP_KEY}
+          DB_HOST=${DB_HOST}
+          DB_DATABASE=${DB_NAME}
+          DB_USERNAME=${DB_USER}
+          DB_PASSWORD=${DB_PASSWORD}
+          REDIS_HOST=${REDIS_HOST}
+          REDIS_PORT=${REDIS_PORT}
+          EOF
+          echo "✓ .env généré pour $(hostname)"
+        env:
+        - name: APP_KEY
+          valueFrom:
+            secretKeyRef:
+              name: librenms-poller-secret
+              key: APP_KEY
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: librenms-poller-secret
+              key: DB_HOST
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: librenms-poller-secret
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: librenms-poller-secret
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: librenms-poller-secret
+              key: DB_PASSWORD
+        - name: REDIS_HOST
+          valueFrom:
+            secretKeyRef:
+              name: librenms-poller-secret
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            secretKeyRef:
+              name: librenms-poller-secret
+              key: REDIS_PORT
+        volumeMounts:
         - name: poller-data
-          emptyDir: {}
+          mountPath: /data
+      # ── Conteneur principal dispatcher ────────────────────────────────────
+      containers:
+      - name: dispatcher
+        image: librenms/librenms:26.2.0
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          capabilities:
+            add:
+              - NET_ADMIN
+              - NET_RAW
+        env:
+        - name: TZ
+          value: "Europe/Paris"
+        - name: PUID
+          value: "1000"
+        - name: PGID
+          value: "1000"
+        - name: SIDECAR_DISPATCHER
+          value: "1"
+        # DISPATCHER_NODE_ID = nom du pod (librenms-poller-0, -1, -2...)
+        - name: DISPATCHER_NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        # ── Base de données externe ──────────────────────────────────────────
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: librenms-poller-secret
+              key: DB_HOST
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: librenms-poller-secret
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: librenms-poller-secret
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: librenms-poller-secret
+              key: DB_PASSWORD
+        - name: DB_TIMEOUT
+          value: "60"
+        # ── Redis ─────────────────────────────────────────────────────────────
+        - name: REDIS_HOST
+          valueFrom:
+            secretKeyRef:
+              name: librenms-poller-secret
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            secretKeyRef:
+              name: librenms-poller-secret
+              key: REDIS_PORT
+        - name: REDIS_DB
+          value: "0"
+        - name: REDIS_SCHEME
+          value: "tcp"
+        - name: REDIS_PASSWORD
+          value: ""
+        # ── RRDcached externe ────────────────────────────────────────────────
+        - name: RRDCACHED_SERVER
+          value: "192.168.98.131:42217"
+        # ── Memcached ────────────────────────────────────────────────────────
+        - name: MEMCACHED_HOST
+          value: "memcached.librenms.svc.cluster.local"
+        - name: MEMCACHED_PORT
+          value: "11211"
+        # ── SNMP ─────────────────────────────────────────────────────────────
+        - name: LIBRENMS_SNMP_COMMUNITY
+          value: "librenmsdocker"
+        - name: SNMP_EXTRA_MIB_DIRS
+          value: "mibs/fortinet:mibs/fortinet/FORTINET-FORTIGATE-MIB"
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "2"
+            memory: "2Gi"
+        volumeMounts:
+        - name: poller-data
+          mountPath: /data
+        # Accès en lecture au PVC librenms-data pour les MIBs et configs
+        - name: librenms-data
+          mountPath: /data/config
+          subPath: config
+      volumes:
+      - name: poller-data
+        emptyDir: {}
+      - name: librenms-data
+        persistentVolumeClaim:
+          claimName: librenms-data-pvc

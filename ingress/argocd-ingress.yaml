@@ -1,20 +1,32 @@
+# ==============================================================================
+# ingress/argocd-ingress.yaml
+# Ingress NGINX — ArgoCD UI
+# ==============================================================================
+# Accès à l'interface ArgoCD via Ingress
+# ArgoCD écoute en HTTPS natif → passthrough SSL ou reencrypt
+#
+# Option retenue : ssl-passthrough (plus simple, pas de certificat à gérer côté Ingress)
+# Pré-requis : --enable-ssl-passthrough activé sur le controller NGINX
+# ==============================================================================
+
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: argocd-server-ingress
+  name: argocd-ingress
   namespace: argocd
   annotations:
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
 spec:
   ingressClassName: nginx
   rules:
-    - host: argocd.local
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: argocd-server
-                port:
-                  number: 443
+  - host: argocd.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: argocd-server
+            port:
+              number: 443
