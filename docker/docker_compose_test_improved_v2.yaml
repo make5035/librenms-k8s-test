@@ -297,7 +297,7 @@ services:
     hostname: argocd-dex
     restart: always
     volumes:
-      - "./argocd/dex-config.yaml:/etc/dex/config.yaml:ro"
+      - "/opt/argocd/dex-config.yaml:/etc/dex/config.yaml:ro"
     networks:
       - argocd-net
     # [NOTE] En lab, Dex peut être désactivé si l'auth locale ArgoCD suffit.
@@ -310,10 +310,13 @@ services:
     #          qui nécessiteraient une migration des CRDs sur le cluster.
     container_name: argocd_repo_server
     hostname: argocd-repo-server
-    command: argocd-repo-server
+    command:
+      - argocd-repo-server
+      - --namespace
+      - argocd
     restart: always
     volumes:
-      - "./argocd/ssh:/home/argocd/.ssh:ro"
+      - "/opt/argocd/kubeconfig:/home/argocd/.kube/config:ro"
       # [RAISON] Clé SSH optionnelle si le repo GitHub est privé en SSH.
       #          Pour HTTPS public, ce volume peut être omis.
     networks:
@@ -334,10 +337,13 @@ services:
     image: quay.io/argoproj/argocd:v2.10.6
     container_name: argocd_app_controller
     hostname: argocd-application-controller
-    command: argocd-application-controller
+    command:
+      - argocd-application-controller
+      - --namespace
+      - argocd
     restart: always
     volumes:
-      - "./argocd/kubeconfig:/home/argocd/.kube/config:ro"
+      - "/opt/argocd/kubeconfig:/home/argocd/.kube/config:ro"
       # [RAISON] Kubeconfig permettant à ArgoCD d'atteindre l'API server du
       #          cluster K8s depuis cette VM. Doit pointer vers l'IP routable
       #          de cp1 (pas 127.0.0.1).
@@ -361,6 +367,8 @@ services:
     command:
       - argocd-server
       - --insecure
+      - --namespace
+      - argocd
       # [RAISON] --insecure désactive le TLS interne du serveur ArgoCD.
       #          Acceptable derrière un reverse proxy (Traefik/Nginx) qui
       #          termine le TLS. À ne PAS utiliser si exposition directe sans proxy.
@@ -369,7 +377,7 @@ services:
       # [NOTE] Interface ArgoCD accessible sur http://<IP_VM>:8080
       #        Ajouter un reverse proxy avec TLS pour un accès sécurisé.
     volumes:
-      - "./argocd/kubeconfig:/home/argocd/.kube/config:ro"
+      - "/opt/argocd/kubeconfig:/home/argocd/.kube/config:ro"
     environment:
       - ARGOCD_REPO_SERVER=argocd-repo-server:8081
       - REDIS_SERVER=argocd-redis:6379
