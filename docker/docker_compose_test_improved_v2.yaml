@@ -1,0 +1,479 @@
+# ==============================================================================
+# docker-compose-test-IMPROVED.yml
+# ==============================================================================
+# À utiliser APRÈS validation du fichier strict.
+# Chaque amélioration est documentée avec :
+#   [AMÉLIORATION] — ce qui change
+#   [RAISON]       — pourquoi c'est utile pour la migration K8s
+#   [RISQUE PROD]  — impact si appliqué tel quel en production
+#
+# Aucune de ces améliorations ne touche la prod en l'état.
+# Ce fichier sert à valider les changements avant de les porter
+# dans les manifests Kubernetes.
+#
+# [v2 - AJOUT ARGOCD]
+# ArgoCD est déployé sur cette VM externe au cluster K8s.
+# Il gère les manifests du repo GitHub vers le cluster distant.
+# Kubeconfig requis : ./argocd/kubeconfig (pointant vers cp1)
+# ==============================================================================
+
+version: "3.8"
+
+services:
+
+  # ── MariaDB 10.5.29 ─────────────────────────────────────────────────────────
+  mariadb:
+    image: mariadb:10.5
+    container_name: librenms_test_mariadb
+    hostname: mariadb
+    command:
+      - "mysqld"
+      - "--innodb-file-per-table=1"
+      - "--lower-case-table-names=0"
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+      - "--max_connections=1000"
+    volumes:
+      - "./data/db:/var/lib/mysql"
+    ports:
+      - "3306:3306"
+    environment:
+      - "TZ=${TZ}"
+      - "MYSQL_ALLOW_EMPTY_PASSWORD=yes"
+      - "MYSQL_DATABASE=${MYSQL_DATABASE}"
+      - "MYSQL_USER=${MYSQL_USER}"
+      - "MYSQL_PASSWORD=${MYSQL_PASSWORD}"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "--silent"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: always
+    networks:
+      - net
+
+  # ── RRDcached 1.9.0 ─────────────────────────────────────────────────────────
+  rrdcached:
+    image: crazymax/rrdcached:1.9.0
+    container_name: librenms_test_rrdcached
+    hostname: rrdcached
+    volumes:
+      - "./data/rrdcached/db:/data/db"
+      - "./data/rrdcached/journal:/data/journal"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "LOG_LEVEL=LOG_INFO"
+      - "WRITE_TIMEOUT=1800"
+      - "WRITE_JITTER=1800"
+      - "WRITE_THREADS=4"
+      - "FLUSH_DEAD_DATA_INTERVAL=3600"
+    ports:
+      - "42217:42217"
+    restart: always
+    networks:
+      - net
+
+  # ── Memcached 1.6.41 ────────────────────────────────────────────────────────
+  memcached:
+    image: memcached:1.6.41
+    container_name: librenms_test_memcached
+    hostname: memcached
+    environment:
+      - "TZ=${TZ}"
+    restart: always
+    networks:
+      - net
+
+  # ── Redis 5.0.14 ────────────────────────────────────────────────────────────
+  redis:
+    image: redis:5.0-alpine
+    container_name: librenms_test_redis
+    hostname: redis
+    environment:
+      - "TZ=${TZ}"
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: always
+    networks:
+      - net
+
+  # ── LibreNMS 26.2.0 — Frontend ──────────────────────────────────────────────
+  librenms:
+    image: librenms/librenms:26.2.0
+    container_name: librenms_test_web
+    hostname: librenms
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    ports:
+      - target: 8000
+        published: 8000
+        protocol: tcp
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      memcached:
+        condition: service_started
+      rrdcached:
+        condition: service_started
+    volumes:
+      - "./data/librenms:/data"
+      - "./data/rrdcached/db:/mnt/rrdcached/db"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=${MYSQL_HOST}"
+      - "DB_NAME=${MYSQL_DATABASE}"
+      - "DB_USER=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "REDIS_HOST=${REDIS_HOST}"
+      - "REDIS_PORT=${REDIS_PORT}"
+      - "REDIS_DB=0"
+      - "RRDCACHED_SERVER=rrdcached:42217"
+    restart: always
+    networks:
+      - net
+
+  # ── Dispatcher / Poller ─────────────────────────────────────────────────────
+  dispatcher:
+    image: librenms/librenms:26.2.0
+    container_name: librenms_test_dispatcher
+    hostname: librenms-poller-test01
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      librenms:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      rrdcached:
+        condition: service_started
+    volumes:
+      - "./data/librenms:/data"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=${MYSQL_HOST}"
+      - "DB_NAME=${MYSQL_DATABASE}"
+      - "DB_USER=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "DISPATCHER_NODE_ID=poller-test-01"
+      - "REDIS_HOST=${REDIS_HOST}"
+      - "REDIS_PORT=${REDIS_PORT}"
+      - "REDIS_DB=0"
+      - "REDIS_SCHEME=tcp"
+      - "REDIS_PASSWORD="
+      - "SIDECAR_DISPATCHER=1"
+      - "RRDCACHED_SERVER=rrdcached:42217"
+    restart: always
+    networks:
+      - net
+
+  # ── Syslog-ng ────────────────────────────────────────────────────────────────
+  syslogng:
+    image: librenms/librenms:26.2.0
+    container_name: librenms_test_syslogng
+    hostname: librenms-syslogng
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      librenms:
+        condition: service_started
+    ports:
+      - target: 514
+        published: 514
+        protocol: tcp
+      - target: 514
+        published: 514
+        protocol: udp
+    volumes:
+      - "./data/librenms:/data"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=${MYSQL_HOST}"
+      - "DB_NAME=${MYSQL_DATABASE}"
+      - "DB_USER=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "REDIS_HOST=${REDIS_HOST}"
+      - "REDIS_PORT=${REDIS_PORT}"
+      - "REDIS_DB=0"
+      - "SIDECAR_SYSLOGNG=1"
+    restart: always
+    networks:
+      - net
+
+  # ── SNMPTrapd ────────────────────────────────────────────────────────────────
+  snmptrapd:
+    image: librenms/librenms:26.2.0
+    container_name: librenms_test_snmptrapd
+    hostname: librenms-snmptrapd
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      librenms:
+        condition: service_started
+    ports:
+      - target: 162
+        published: 162
+        protocol: tcp
+      - target: 162
+        published: 162
+        protocol: udp
+    volumes:
+      - "./data/librenms:/data"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=${MYSQL_HOST}"
+      - "DB_NAME=${MYSQL_DATABASE}"
+      - "DB_USER=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "SIDECAR_SNMPTRAPD=1"
+    restart: always
+    networks:
+      - net
+
+  # ============================================================================
+  # ARGOCD — Déployé sur cette VM externe au cluster K8s
+  # [AJOUT v2] ArgoCD extrait du cluster K8s et repositionné ici
+  # [RAISON]   Évite la dépendance circulaire : ArgoCD ne doit pas être géré
+  #            par le cluster qu'il maintient. Pattern "Hub and Spoke" simplifié.
+  # [PRÉREQUIS] Fichier ./argocd/kubeconfig valide pointant vers cp1
+  #             (IP publique/routable de l'API server K8s)
+  # [RISQUE]   La VM doit avoir un accès réseau vers l'API K8s (port 6443)
+  # ============================================================================
+
+  # ── ArgoCD Redis (interne ArgoCD — séparé du Redis LibreNMS) ─────────────────
+  argocd-redis:
+    # [RAISON] ArgoCD a besoin de son propre Redis pour son état interne.
+    #          On utilise une instance dédiée pour éviter toute collision
+    #          avec le Redis LibreNMS (queues dispatcher)
+    image: redis:7.0-alpine
+    container_name: argocd_redis
+    hostname: argocd-redis
+    restart: always
+    networks:
+      - argocd-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── ArgoCD Dex (authentification OIDC) ───────────────────────────────────────
+  argocd-dex:
+    image: ghcr.io/dex-idp/dex:v2.38.0
+    container_name: argocd_dex
+    hostname: argocd-dex
+    restart: always
+    volumes:
+      - "./argocd/dex-config.yaml:/etc/dex/config.yaml:ro"
+    networks:
+      - argocd-net
+    # [NOTE] En lab, Dex peut être désactivé si l'auth locale ArgoCD suffit.
+    #        Commenter ce service et désactiver dex dans argocd-server si non requis.
+
+  # ── ArgoCD Repo Server ────────────────────────────────────────────────────────
+  argocd-repo-server:
+    image: quay.io/argoproj/argocd:v2.10.6
+    # [RAISON] v2.10.x LTS — version stable, évite les breaking changes de v3.x
+    #          qui nécessiteraient une migration des CRDs sur le cluster.
+    container_name: argocd_repo_server
+    hostname: argocd-repo-server
+    command: argocd-repo-server
+    restart: always
+    volumes:
+      - "./argocd/ssh:/home/argocd/.ssh:ro"
+      # [RAISON] Clé SSH optionnelle si le repo GitHub est privé en SSH.
+      #          Pour HTTPS public, ce volume peut être omis.
+    networks:
+      - argocd-net
+    environment:
+      - ARGOCD_REPO_SERVER_DISABLE_TLS=true
+      # [RAISON] TLS inter-composants désactivé en interne Docker réseau privé.
+      #          TLS externe géré par le reverse proxy si nécessaire.
+    healthcheck:
+      test: ["CMD", "argocd", "version", "--client"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # ── ArgoCD Application Controller ────────────────────────────────────────────
+  argocd-application-controller:
+    image: quay.io/argoproj/argocd:v2.10.6
+    container_name: argocd_app_controller
+    hostname: argocd-application-controller
+    command: argocd-application-controller
+    restart: always
+    volumes:
+      - "./argocd/kubeconfig:/home/argocd/.kube/config:ro"
+      # [RAISON] Kubeconfig permettant à ArgoCD d'atteindre l'API server du
+      #          cluster K8s depuis cette VM. Doit pointer vers l'IP routable
+      #          de cp1 (pas 127.0.0.1).
+    environment:
+      - ARGOCD_SERVER=argocd-server:8080
+      - REDIS_SERVER=argocd-redis:6379
+      - ARGOCD_APPLICATION_CONTROLLER_REPO_SERVER=argocd-repo-server:8081
+    depends_on:
+      argocd-redis:
+        condition: service_healthy
+      argocd-repo-server:
+        condition: service_started
+    networks:
+      - argocd-net
+
+  # ── ArgoCD Server (UI + API) ──────────────────────────────────────────────────
+  argocd-server:
+    image: quay.io/argoproj/argocd:v2.10.6
+    container_name: argocd_server
+    hostname: argocd-server
+    command:
+      - argocd-server
+      - --insecure
+      # [RAISON] --insecure désactive le TLS interne du serveur ArgoCD.
+      #          Acceptable derrière un reverse proxy (Traefik/Nginx) qui
+      #          termine le TLS. À ne PAS utiliser si exposition directe sans proxy.
+    ports:
+      - "8080:8080"
+      # [NOTE] Interface ArgoCD accessible sur http://<IP_VM>:8080
+      #        Ajouter un reverse proxy avec TLS pour un accès sécurisé.
+    volumes:
+      - "./argocd/kubeconfig:/home/argocd/.kube/config:ro"
+    environment:
+      - ARGOCD_REPO_SERVER=argocd-repo-server:8081
+      - REDIS_SERVER=argocd-redis:6379
+      - ARGOCD_DEX_SERVER=http://argocd-dex:5556
+    depends_on:
+      argocd-redis:
+        condition: service_healthy
+      argocd-repo-server:
+        condition: service_started
+      argocd-application-controller:
+        condition: service_started
+    restart: always
+    networks:
+      - argocd-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+# ── Réseaux ────────────────────────────────────────────────────────────────────
+networks:
+  net:
+    # Réseau LibreNMS (inchangé)
+    driver: "bridge"
+    ipam:
+      config:
+        - subnet: 10.200.0.0/24
+
+  argocd-net:
+    # [AJOUT] Réseau isolé pour les composants ArgoCD
+    # [RAISON] Isolation réseau stricte — ArgoCD n'a aucune raison de
+    #          communiquer avec MariaDB, Redis LibreNMS ou les pollers.
+    #          Réduction de la surface d'attaque.
+    driver: "bridge"
+    ipam:
+      config:
+        - subnet: 10.201.0.0/24
+
+# ==============================================================================
+# STRUCTURE DE FICHIERS REQUISE POUR ARGOCD
+# ==============================================================================
+#
+# ./argocd/
+# ├── kubeconfig              # kubeconfig pointant vers cp1 (IP routable)
+# ├── dex-config.yaml         # Config Dex OIDC (voir exemple ci-dessous)
+# └── ssh/                    # Optionnel : clé SSH si repo privé
+#     └── id_rsa
+#
+# Exemple dex-config.yaml minimal (auth locale uniquement) :
+# ---
+# issuer: http://argocd-dex:5556
+# storage:
+#   type: memory
+# web:
+#   http: 0.0.0.0:5556
+# oauth2:
+#   skipApprovalScreen: true
+# staticClients:
+#   - id: argo-cd
+#     redirectURIs:
+#       - http://<IP_VM>:8080/auth/callback
+#     name: ArgoCD
+#     secret: argocd-secret
+# enablePasswordDB: true
+# staticPasswords:
+#   - email: "admin@local"
+#     hash: "$2a$10$..."   # bcrypt hash
+#     username: "admin"
+#     userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+#
+# ==============================================================================
+# PROCÉDURE POST-DÉMARRAGE ARGOCD
+# ==============================================================================
+#
+# 1. Démarrer uniquement ArgoCD :
+#    docker compose up -d argocd-redis argocd-repo-server \
+#                         argocd-application-controller argocd-server
+#
+# 2. Récupérer le mot de passe admin initial :
+#    docker exec argocd_server argocd admin initial-password
+#
+# 3. Se connecter à l'UI : http://<IP_VM>:8080
+#
+# 4. Enregistrer le cluster K8s dans ArgoCD via CLI :
+#    docker exec -it argocd_server argocd login localhost:8080 \
+#      --username admin --password <MOT_DE_PASSE> --insecure
+#
+#    docker exec -it argocd_server argocd cluster add \
+#      --kubeconfig /home/argocd/.kube/config \
+#      --name librenms-k8s \
+#      <CONTEXT_NAME>
+#    # context_name = valeur de "current-context" dans le kubeconfig
+#
+# 5. Appliquer l'Application LibreNMS :
+#    Copier argocd/librenms-app.yaml sur cette VM puis :
+#    docker exec -i argocd_server kubectl apply -f - < argocd/librenms-app.yaml
+#    # OU via l'UI ArgoCD directement
+#
+# 6. Adapter librenms-app.yaml — changer destination.server :
+#    Remplacer :
+#      server: https://kubernetes.default.svc   ← cluster interne (INVALIDE ici)
+#    Par :
+#      server: https://<IP_CP1>:6443            ← API server externe
+#
+# ==============================================================================
