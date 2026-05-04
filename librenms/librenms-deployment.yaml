@@ -73,7 +73,7 @@ spec:
           value: "3306"
         - name: DB_NAME
           value: "librenms"
-        - name: DB_USER
+        - name: DB_USERNAME
           valueFrom:
             secretKeyRef:
               name: librenms-secret
