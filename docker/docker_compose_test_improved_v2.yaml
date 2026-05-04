@@ -291,15 +291,15 @@ services:
       retries: 5
 
   # ── ArgoCD Dex (authentification OIDC) ───────────────────────────────────────
-  argocd-dex:
-    image: ghcr.io/dex-idp/dex:v2.38.0
-    container_name: argocd_dex
-    hostname: argocd-dex
-    restart: always
-    volumes:
-      - "/opt/argocd/dex-config.yaml:/etc/dex/config.yaml:ro"
-    networks:
-      - argocd-net
+#  argocd-dex:
+#    image: ghcr.io/dex-idp/dex:v2.38.0
+#    container_name: argocd_dex
+#    hostname: argocd-dex
+#    restart: always
+#    volumes:
+#      - "/opt/argocd/dex-config.yaml:/etc/dex/config.yaml:ro"
+#    networks:
+#      - argocd-net
     # [NOTE] En lab, Dex peut être désactivé si l'auth locale ArgoCD suffit.
     #        Commenter ce service et désactiver dex dans argocd-server si non requis.
 
@@ -381,7 +381,7 @@ services:
     environment:
       - ARGOCD_REPO_SERVER=argocd-repo-server:8081
       - REDIS_SERVER=argocd-redis:6379
-      - ARGOCD_DEX_SERVER=http://argocd-dex:5556
+#      - ARGOCD_DEX_SERVER=http://argocd-dex:5556
     depends_on:
       argocd-redis:
         condition: service_healthy
