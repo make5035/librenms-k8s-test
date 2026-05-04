@@ -312,8 +312,6 @@ services:
     hostname: argocd-repo-server
     command:
       - argocd-repo-server
-      - --namespace
-      - argocd
     restart: always
     volumes:
       - "/opt/argocd/kubeconfig:/home/argocd/.kube/config:ro"
