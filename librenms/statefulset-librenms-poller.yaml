@@ -49,7 +49,7 @@ spec:
           APP_KEY=${APP_KEY}
           DB_HOST=${DB_HOST}
           DB_DATABASE=${DB_NAME}
-          DB_USERNAME=${DB_USER}
+          DB_USERNAME=${DB_USERNAME}
           DB_PASSWORD=${DB_PASSWORD}
           REDIS_HOST=${REDIS_HOST}
           REDIS_PORT=${REDIS_PORT}
@@ -71,11 +71,11 @@ spec:
             secretKeyRef:
               name: librenms-poller-secret
               key: DB_NAME
-        - name: DB_USER
+        - name: DB_USERNAME
           valueFrom:
             secretKeyRef:
               name: librenms-poller-secret
-              key: DB_USER
+              key: DB_USERNAME
         - name: DB_PASSWORD
           valueFrom:
             secretKeyRef:
@@ -129,11 +129,11 @@ spec:
             secretKeyRef:
               name: librenms-poller-secret
               key: DB_NAME
-        - name: DB_USER
+        - name: DB_USERNAME
           valueFrom:
             secretKeyRef:
               name: librenms-poller-secret
-              key: DB_USER
+              key: DB_USERNAME
         - name: DB_PASSWORD
           valueFrom:
             secretKeyRef:
