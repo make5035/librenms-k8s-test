@@ -66,3 +66,22 @@ spec:
   resources:
     requests:
       storage: 1Gi
+---
+# PVC RRDcached — données RRD historiques (metrics réseau)
+# RWX requis : accès par les pods pollers et le pod rrdcached
+# Taille prod : 1,5 Ti — taille test : 10 Gi (395 Mo de données actuelles)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rrdcached-data-pvc
+  namespace: librenms
+  labels:
+    app: librenms
+    component: rrdcached
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 10Gi
