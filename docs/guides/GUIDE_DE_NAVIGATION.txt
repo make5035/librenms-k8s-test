@@ -1,0 +1,288 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║                 GUIDE DE NAVIGATION — FICHIERS LIVRABLES                  ║
+║          Recueil Unifié des Erreurs et Résolutions (LibreNMS K8s)        ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+📂 STRUCTURE DE FICHIERS
+═══════════════════════════════════════════════════════════════════════════
+
+outputs/
+├── 📘 LibreNMS_Kubernetes_Erreurs_Resolutions_UNIFIED.docx (43 KB)
+│   └─ Document professionnel avec 12 erreurs détaillées
+│
+├── 📋 INDEX_ERREURS_RESOLUTIONS.md (9 KB)
+│   └─ Table de recherche et index par catégorie
+│
+├── 🔧 DIAGNOSTIC_RAPIDE.md (8.3 KB)
+│   └─ Guide de troubleshooting pratique
+│
+├── 📖 README_COMPLETE.md (8.2 KB)
+│   └─ Guide de sélection des fichiers (ce document)
+│
+├── 📊 RESUME_EXECUTION.txt (9.7 KB)
+│   └─ Résumé d'exécution complet
+│
+├── 🎨 ARCHITECTURE_VISUELLE.txt (17 KB)
+│   └─ Diagrammes ASCII et visualisations
+│
+├── 🔗 errors_unified_complete.json (18 KB)
+│   └─ Données JSON structurées (pour intégration systèmes)
+│
+└── 📝 GUIDE_DE_NAVIGATION.txt (ce fichier)
+    └─ Vous êtes ici !
+
+
+🎯 PAR BESOIN : QUEL FICHIER UTILISER ?
+═══════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ SITUATION : Je dois résoudre un incident MAINTENANT (urgence)           │
+├─────────────────────────────────────────────────────────────────────────┤
+│ PRIORITÉ : Diagnostic rapide → Commandes → Validation                   │
+│                                                                         │
+│ 1️⃣  DIAGNOSTIC_RAPIDE.md                                               │
+│     → Section "🔍 Diagnostic Rapide par Symptôme"                      │
+│     → Chercher votre symptôme (ex: "CrashLoopBackOff")                 │
+│     → Exécuter les commandes de vérification (copy-paste)              │
+│                                                                         │
+│ 2️⃣  INDEX_ERREURS_RESOLUTIONS.md                                       │
+│     → Table de recherche rapide                                         │
+│     → Localiser le numéro d'erreur correspondant (#1-#12)              │
+│                                                                         │
+│ 3️⃣  LibreNMS_Kubernetes_Erreurs_Resolutions_UNIFIED.docx               │
+│     → Chercher l'erreur #X                                              │
+│     → Lire la section "Résolution Appliquée"                           │
+│     → Exécuter les commandes à partir de "Commandes"                   │
+│                                                                         │
+│ 4️⃣  DIAGNOSTIC_RAPIDE.md (Checklist)                                   │
+│     → Valider la résolution avec la checklist pertinente               │
+│     → Confirmer que le problème est résolu                             │
+│                                                                         │
+│ ⏱️  Temps estimé : 5-15 minutes                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ SITUATION : Je dois comprendre une erreur en détail (recherche)         │
+├─────────────────────────────────────────────────────────────────────────┤
+│ PRIORITÉ : Contexte → Cause → Résolution → Notes                        │
+│                                                                         │
+│ 1️⃣  INDEX_ERREURS_RESOLUTIONS.md                                       │
+│     → Table de recherche : chercher par titre ou mot-clé               │
+│     → Récupérer le numéro d'erreur (#1-#12)                            │
+│                                                                         │
+│ 2️⃣  LibreNMS_Kubernetes_Erreurs_Resolutions_UNIFIED.docx               │
+│     → Aller directement à l'erreur #X                                   │
+│     → Lire la structure complète :                                      │
+│        • 🔹 Contexte (situation)                                        │
+│        • 🔹 Symptômes (signes observables)                             │
+│        • 🔹 Cause Identifiée (analyse technique)                       │
+│        • 🔹 Résolution Appliquée (comment corriger)                    │
+│        • 🔹 Commandes (étapes exactes)                                 │
+│        • 📌 Notes (bonnes pratiques)                                   │
+│                                                                         │
+│ 3️⃣  ARCHITECTURE_VISUELLE.txt (optionnel)                              │
+│     → Comprendre le flux global                                         │
+│     → Voir comment l'erreur s'insère dans l'architecture               │
+│                                                                         │
+│ ⏱️  Temps estimé : 15-30 minutes                                        │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ SITUATION : J'intègre dans mon ITSM / Knowledge Base                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│ PRIORITÉ : Données structurées → Import → Mapping                       │
+│                                                                         │
+│ 1️⃣  errors_unified_complete.json                                       │
+│     → Ouvrir avec éditeur JSON ou parser                               │
+│     → Structure : array[12] objets avec champs standardisés             │
+│     → Champs : id, title, category, context, symptoms[],              │
+│       cause, resolution, commands[], notes                             │
+│                                                                         │
+│ 2️⃣  Parser JSON pour votre système                                     │
+│     → Importer dans ITSM (ServiceNow, Jira, etc.)                      │
+│     → Créer incidents types ou "Problem" records                       │
+│     → Lier à solutions (Resolutions et Commandes)                      │
+│                                                                         │
+│ 3️⃣  Index.md (pour référence humaine)                                  │
+│     → Mots-clés pour recherche full-text                               │
+│     → Catégorisation pour navigation                                    │
+│                                                                         │
+│ ⏱️  Temps estimé : 30-60 minutes (dépend complexité ITSM)              │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ SITUATION : Je formes mon équipe / J'archive la documentation           │
+├─────────────────────────────────────────────────────────────────────────┤
+│ PRIORITÉ : Couverture globale → Référence → Archivage                  │
+│                                                                         │
+│ 1️⃣  RESUME_EXECUTION.txt (ce document)                                 │
+│     → Vue d'ensemble du projet                                          │
+│     → Statistiques et métriques                                         │
+│     → Recommandations générales                                         │
+│                                                                         │
+│ 2️⃣  LibreNMS_Kubernetes_Erreurs_Resolutions_UNIFIED.docx               │
+│     → Imprimer l'intégralité                                            │
+│     → Matériel de formation pour l'équipe                              │
+│     → Archivage formelle (dossier réseau)                              │
+│                                                                         │
+│ 3️⃣  README_COMPLETE.md                                                 │
+│     → Guide de gouvernance                                              │
+│     → Workflows de support                                              │
+│     → Checklists de validation                                          │
+│                                                                         │
+│ 4️⃣  ARCHITECTURE_VISUELLE.txt                                          │
+│     → Présentation globale aux stakeholders                             │
+│     → Aide à la compréhension de la structure                          │
+│                                                                         │
+│ 5️⃣  Tous les fichiers → Git repository                                │
+│     → Versioning et historique                                          │
+│     → Collaboration et updates                                          │
+│                                                                         │
+│ ⏱️  Temps estimé : 1-2 heures                                           │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+📱 GUIDE RAPIDE PAR RÔLE
+═══════════════════════════════════════════════════════════════════════════
+
+👨‍💼 MANAGER / COORDINATEUR
+  → README_COMPLETE.md
+  → RESUME_EXECUTION.txt
+  → ARCHITECTURE_VISUELLE.txt
+  (Vue d'ensemble, métriques, impacts)
+
+👨‍💻 INGÉNIEUR DEVOPS / SRE
+  → INDEX_ERREURS_RESOLUTIONS.md
+  → DIAGNOSTIC_RAPIDE.md
+  → UNIFIED.docx
+  (Référence technique, troubleshooting, détails)
+
+🔧 TECHNICIEN SUPPORT / EXPLOITATION
+  → DIAGNOSTIC_RAPIDE.md
+  → INDEX_ERREURS_RESOLUTIONS.md
+  (Procédures step-by-step, commands)
+
+🤖 SYSTEM INTEGRATION / AUTOMATION
+  → errors_unified_complete.json
+  → INDEX.md (pour mots-clés)
+  (Données structurées, integration API)
+
+📚 FORMATION / DOCUMENTATION
+  → UNIFIED.docx (imprimer)
+  → DIAGNOSTIC_RAPIDE.md
+  → README_COMPLETE.md
+  (Matériel pédagogique complet)
+
+
+💾 ORGANISATION FICHIERS RECOMMANDÉE
+═══════════════════════════════════════════════════════════════════════════
+
+Structure Git / Documenté proposée :
+
+documentation/
+├── troubleshooting/
+│   ├── UNIFIED.docx (archive formelle)
+│   ├── INDEX.md (référence rapide)
+│   ├── DIAGNOSTIC.md (opérations)
+│   └── errors.json (intégration)
+│
+├── guides/
+│   ├── README_COMPLETE.md (navigation)
+│   ├── ARCHITECTURE_VISUELLE.txt (diagrammes)
+│   └── RESUME_EXECUTION.txt (synthèse)
+│
+└── versioning/
+    ├── CHANGELOG.md (mises à jour futures)
+    └── README.md (instructions d'usage)
+
+
+🔐 RECOMMANDATIONS DE SÉCURITÉ
+═══════════════════════════════════════════════════════════════════════════
+
+Fichiers à protéger
+  ☐ errors_unified_complete.json → Peut contenir IP/domaines
+  ☐ DIAGNOSTIC_RAPIDE.md → Contient commandes système
+  ☐ UNIFIED.docx → Peut être confidentiel
+
+Recommandations
+  • Stocker dans Git privé (pas public)
+  • Partager avec confidentialité "Internal Only"
+  • Imprimer sous contrôle d'accès
+  • Archiver avec retention policy (3 ans min)
+  • Exclure secrets/passwords (ils ne sont pas dans ce recueil)
+
+
+✅ CHECKLIST DE VÉRIFICATION
+═══════════════════════════════════════════════════════════════════════════
+
+Avant utilisation en production
+  [ ] Tous les fichiers présents (8 fichiers)
+  [ ] Fichier DOCX ouvre correctement
+  [ ] Fichiers Markdown lisibles (UTF-8)
+  [ ] JSON valide (parser sans erreur)
+  [ ] Commandes testées (syntaxe correcte)
+  [ ] Cross-références validées
+
+Lors d'un incident
+  [ ] Symptôme trouvé dans DIAGNOSTIC.md
+  [ ] Erreur identifiée via INDEX.md
+  [ ] Détail vérifié dans UNIFIED.docx
+  [ ] Commandes exécutées correctement
+  [ ] Résolution validée avec checklist
+  [ ] Feedback noté pour améliorations futures
+
+
+📞 CONTACTS & SUPPORT
+═══════════════════════════════════════════════════════════════════════════
+
+Auteur Principal
+  • Matt (Administrateur Systèmes et Réseaux)
+  • Projet : Migration LibreNMS K8s
+
+Escalade
+  • Problème URGENT → Matt (first contact)
+  • ITSM → Importer JSON
+  • Formation → Utiliser UNIFIED.docx
+
+Repository
+  • GitHub : make5035/librenms-k8s-test
+  • Documentation : /docs/troubleshooting
+
+
+🚀 ÉTAPES SUIVANTES
+═══════════════════════════════════════════════════════════════════════════
+
+Phase 1 : Déploiement (immédiat)
+  ✓ Mettre tous les fichiers en accès sécurisé
+  ✓ Former l'équipe support (1-2 heures)
+  ✓ Importer dans ITSM si applicable
+
+Phase 2 : Utilisation (continu)
+  ✓ Utiliser pour troubleshooting incidents
+  ✓ Collecter retours / améliorations
+  ✓ Documenter nouveaux cas / erreurs
+
+Phase 3 : Maintenance (mensuel)
+  ✓ Revalider avec checklist DIAGNOSTIC.md
+  ✓ Mettre à jour si nouvelles erreurs
+  ✓ Archiver logs d'incidents résolus
+
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║                    SUMMARY — TL;DR VERSION                                ║
+║                                                                            ║
+║ 8 fichiers générés, 12 erreurs documentées, 100% couverture               ║
+║                                                                            ║
+║ EN URGENCE      → DIAGNOSTIC_RAPIDE.md                                    ║
+║ DÉTAIL REQUIS   → UNIFIED.docx                                            ║
+║ RECHERCHE RAPIDE→ INDEX_ERREURS_RESOLUTIONS.md                            ║
+║ INTÉGRATION     → errors_unified_complete.json                            ║
+║ GOUVERNANCE     → README_COMPLETE.md                                      ║
+║                                                                            ║
+║ ✅ Prêt pour production, archivage, intégration et formation               ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+📅 Généré : 7 mai 2026
+👤 Auteur : Matt (ASR)
+🔗 Repo  : make5035/librenms-k8s-test
+✨ Status: PRODUCTION-READY

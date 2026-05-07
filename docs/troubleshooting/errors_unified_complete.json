@@ -1,0 +1,216 @@
+[
+  {
+    "id": 1,
+    "title": "ArgoCD : Kubeconfig inaccessible (Permission denied)",
+    "category": "ArgoCD",
+    "context": "ArgoCD est déployé via Docker Compose sur une VM externe au cluster K8s. Le fichier kubeconfig permet à ArgoCD de communiquer avec l'API server du cluster K8s distant (cp1).",
+    "symptoms": [
+      "time=\"2026-04-24T09:06:00Z\" level=fatal msg=\"error loading config file \"/home/argocd/.kube/config\": open /home/argocd/.kube/config: permission denied\""
+    ],
+    "cause": "Le fichier kubeconfig sur la VM avait les permissions 600 (readable uniquement par root). ArgoCD tourne dans un container avec un utilisateur non-root qui ne peut pas lire le fichier.",
+    "resolution": "Modifier les permissions du fichier pour le rendre lisible par tous (mode 644).",
+    "commands": [
+      "chmod 644 /opt/argocd/kubeconfig",
+      "ls -la /opt/argocd/kubeconfig  # Vérification : -rw-r--r-- 1 root root ..."
+    ],
+    "notes": "Les permissions doivent être 644 pour que tous les utilisateurs puissent lire, mais seul root peut modifier."
+  },
+  {
+    "id": 2,
+    "title": "ArgoCD : Kubeconfig créé comme répertoire (is a directory)",
+    "category": "ArgoCD",
+    "context": "Docker Compose monte le kubeconfig à partir d'un chemin relatif qui n'existait pas au moment du démarrage du container.",
+    "symptoms": [
+      "time=\"2026-04-24T08:45:26Z\" level=fatal msg=\"error loading config file \"/home/argocd/.kube/config\": read /home/argocd/.kube/config: is a directory\""
+    ],
+    "cause": "Docker crée automatiquement un répertoire vide si la source du volume n'existe pas. Le chemin relatif ./argocd/kubeconfig n'existait pas, tandis que le fichier réel était dans /opt/argocd/.",
+    "resolution": "Adapter le docker-compose.yml pour utiliser les chemins absolus /opt/argocd/ au lieu de chemins relatifs.",
+    "commands": [
+      "# Avant (chemin relatif - INCORRECT):\nvolumes:\n  - \"./argocd/kubeconfig:/home/argocd/.kube/config:ro\"",
+      "# Après (chemin absolu - CORRECT):\nvolumes:\n  - \"/opt/argocd/kubeconfig:/home/argocd/.kube/config:ro\""
+    ],
+    "notes": "Les services affectés : argocd-server, argocd-application-controller, argocd-repo-server, argocd-dex"
+  },
+  {
+    "id": 3,
+    "title": "ArgoCD : ConfigMaps non trouvées (Hub and Spoke)",
+    "category": "ArgoCD",
+    "context": "ArgoCD sur la VM externe cherche ses ConfigMaps et Secrets (argocd-cm, argocd-secret, etc.) dans le cluster K8s, mais ces ressources avaient été supprimées lors de la désinstallation d'ArgoCD du cluster.",
+    "symptoms": [
+      "time=\"2026-04-24T09:08:55Z\" level=fatal msg=\"error retrieving argocd-cm: configmap \"argocd-cm\" not found\""
+    ],
+    "cause": "L'architecture Hub and Spoke requiert que les ConfigMaps et Secrets ArgoCD existent dans le cluster, même si aucun workload ArgoCD ne s'y exécute. Les ConfigMaps avaient été supprimées lors du nettoyage du cluster après la migration.",
+    "resolution": "Sur cp1, réappliquer install.yaml pour recréer uniquement les ConfigMaps, Secrets et RBAC (les Deployments/StatefulSets resteront sans pods). Utiliser les flags --server-side et --force-conflicts pour gérer les limitations d'annotation size.",
+    "commands": [
+      "kubectl apply -n argocd \\\n  -f argocd/install/install.yaml \\\n  --server-side --force-conflicts",
+      "kubectl get secret,cm -n argocd  # Vérifier que les ressources existent"
+    ],
+    "notes": "Le flag --server-side est obligatoire (annotation size limit). L'erreur sur applicationsets.argoproj.io CRD est bénigne. Les Deployments ArgoCD sur le cluster resteront sans pods (comportement normal en architecture externe)."
+  },
+  {
+    "id": 4,
+    "title": "ArgoCD : Mauvais namespace par défaut",
+    "category": "ArgoCD",
+    "context": "ArgoCD dans Docker Compose ne spécifie pas le namespace cible et cherche ses ConfigMaps dans le namespace 'default' au lieu de 'argocd'.",
+    "symptoms": [
+      "Impossibilité pour ArgoCD de démarrer correctement, erreurs de configuration absentes."
+    ],
+    "cause": "Les commandes des services ArgoCD dans le docker-compose ne spécifiaient pas le flag --namespace argocd pour les trois composants principaux.",
+    "resolution": "Ajouter le flag --namespace argocd aux 3 services ArgoCD principaux dans docker-compose.yml.",
+    "commands": [
+      "argocd-server:\n  command:\n    - argocd-server\n    - --insecure\n    - --namespace\n    - argocd",
+      "argocd-application-controller:\n  command:\n    - argocd-application-controller\n    - --namespace\n    - argocd",
+      "argocd-repo-server:\n  command:\n    - argocd-repo-server\n    - --namespace\n    - argocd"
+    ],
+    "notes": "Dex n'a pas besoin du flag --namespace car il n'a pas accès au cluster."
+  },
+  {
+    "id": 5,
+    "title": "ArgoCD : Version incompatible (v3.3.6 vs v2.10.6)",
+    "category": "ArgoCD",
+    "context": "L'install.yaml utilisé était en v3.3.6, tandis que le docker-compose utilisait ArgoCD v2.10.6. Les CRDs ne correspondent pas entre versions majeures.",
+    "symptoms": [
+      "applicationset-controller crash en boucle",
+      "error=\"failed to get restmapping: no matches for kind \"ApplicationSet\" in version \"argoproj.io/v1alpha1\""
+    ],
+    "cause": "Version mismatch entre le code Docker Compose et les CRDs installées sur le cluster. Les formats des CRDs ont changé entre v2.10.6 et v3.3.6.",
+    "resolution": "Aligner toutes les versions sur v2.10.6 (version stable choisie pour ce projet).",
+    "commands": [
+      "kubectl delete -f argocd/install/install.yaml -n argocd",
+      "curl -L https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.6/manifests/install.yaml \\\n  -o argocd/install/install.yaml",
+      "kubectl apply -n argocd -f argocd/install/install.yaml \\\n  --server-side --force-conflicts"
+    ],
+    "notes": "v2.10.6 est la version LTS recommandée pour la stabilité long terme."
+  },
+  {
+    "id": 6,
+    "title": "ArgoCD : server.secretkey missing (Warning)",
+    "category": "ArgoCD",
+    "context": "ArgoCD utilise une clé secrète pour signer les sessions et cookies. Si cette clé n'est pas définie dans le secret argocd-secret, ArgoCD génère une clé aléatoire à chaque redémarrage.",
+    "symptoms": [
+      "time=\"2026-04-24T09:47:20Z\" level=warning msg=\"Unable to parse updated settings: server.secretkey is missing\"",
+      "Sessions invalidées après redémarrage d'ArgoCD"
+    ],
+    "cause": "Le secret argocd-secret n'a pas été initialisé avec une valeur server.secretkey persistante lors de l'installation.",
+    "resolution": "Sur cp1, générer et injecter une server.secretkey stable dans le secret argocd-secret.",
+    "commands": [
+      "kubectl -n argocd patch secret argocd-secret \\\n  -p '{\"stringData\": {\"server.secretkey\": \"'$(openssl rand -base64 32)'\"}}'",
+      "# Puis redémarrer argocd-server sur la VM Docker:\ndocker compose -f docker_compose_test_improved_v2.yaml restart argocd-server"
+    ],
+    "notes": "La clé générée doit être stable (stockée dans Git ou secrétaire secrets management). Utiliser SOPS+age en production."
+  },
+  {
+    "id": 7,
+    "title": "LibreNMS : RRDcached inaccessible (Ancien IP binding)",
+    "category": "Stockage / Réseau",
+    "context": "LibreNMS pod lance validate.php et échoue avec l'erreur : Cannot connect to rrdcached server 192.168.98.131 on port 42217.",
+    "symptoms": [
+      "Interface web : \"Whoops, looks like something went wrong.\"",
+      "validate.php retourne [FAIL] rrdcached connexion",
+      "pod logs : Cannot connect to rrdcached server 192.168.98.131:42217"
+    ],
+    "cause": "Fichier /etc/default/rrdcached sur la VM 192.168.98.131 était configuré avec l'ancienne IP réseau (192.168.44.131). RRDcached tentait de se binder sur cette IP inexistante → échec du bind → écoute uniquement sur socket unix → K8s pod ne peut pas atteindre le port TCP. De plus, WRITE_JITTER=0 est rejeté (doit être > 0).",
+    "resolution": "Mettre à jour la configuration RRDcached sur la VM avec la bonne IP réseau et un WRITE_JITTER valide (> 0).",
+    "commands": [
+      "ssh -t matt@192.168.98.131",
+      "sudo nano /etc/default/rrdcached",
+      "# Modifier les lignes :\nNETWORK_OPTIONS=\"-l 192.168.98.131:42217\"       # (était 192.168.44.131)\nWRITE_JITTER=300                              # (était 0)",
+      "sudo systemctl restart rrdcached",
+      "sudo systemctl status rrdcached                 # Vérifier le bind sans erreur"
+    ],
+    "notes": "WRITE_JITTER doit être > 0 (généralement 300 secondes). Vérifier que le pod peut accéder à 192.168.98.131:42217 via une requête netcat depuis le cluster."
+  },
+  {
+    "id": 8,
+    "title": "LibreNMS : initContainer wait-for-redis (DNS race condition)",
+    "category": "Kubernetes",
+    "context": "Pods LibreNMS crashent en CrashLoopBackOff après déploiement. PHP-FPM tente de contacter Redis avant que CoreDNS soit prêt dans le pod.",
+    "symptoms": [
+      "Pod status : 0/1 Running, RESTARTS 3+ fois",
+      "Log erreur : Predis\\Connection\\Resource\\Exception\\StreamInitException php_network_getaddresses: getaddrinfo for redis.librenms.svc.cluster.local failed: Try again"
+    ],
+    "cause": "PHP-FPM tente de contacter Redis dès le démarrage, avant que le CoreDNS pod du namespace soit joignable. La résolution DNS échoue temporairement → Laravel plante → pod tué par liveness probe.",
+    "resolution": "Ajouter un initContainer qui attend que Redis soit joignable avant de démarrer le conteneur principal. Utiliser netcat (nc) pour vérifier la connectivité.",
+    "commands": [
+      "# Dans librenms-deployment.yaml, ajouter :\nspec:\n  template:\n    spec:\n      initContainers:\n      - name: wait-for-redis\n        image: busybox:1.36\n        command:\n          - /bin/sh\n          - -c\n          - |\n            echo \"Attente de Redis...\"\n            until nc -z redis.librenms.svc.cluster.local 6379; do\n              sleep 2\n            done\n            echo \"Redis OK\"",
+      "kubectl apply -f librenms/librenms-deployment.yaml"
+    ],
+    "notes": "L'initContainer n'ajoute que quelques secondes au démarrage. Busybox est très léger (~1.2 MB). Cette approche est recommandée par Kubernetes pour les dépendances de démarrage."
+  },
+  {
+    "id": 9,
+    "title": "LibreNMS : DNS intermittent (ndots:5 + CoreDNS saturation)",
+    "category": "Réseau / DNS",
+    "context": "Interface web accessible, mais POST login échoue avec Predis connection error intermittent. GET /login fonctionne (200 OK), mais POST /login retourne 500 Internal Server Error.",
+    "symptoms": [
+      "GET /login → 200 OK (rendu initial)",
+      "POST /login → 500 Internal Server Error (écriture session Redis échoue)",
+      "Log : Predis getaddrinfo failed: Try again [tcp://redis.librenms.svc.cluster.local:6379]",
+      "Problème intermittent, ne se reproduit pas systématiquement"
+    ],
+    "cause": "Pod /etc/resolv.conf contient ndots:5 (paramètre par défaut). PHP-FPM refait la résolution DNS à chaque connexion Redis → tente 4-5 variantes avec suffixes de recherche avant résolution directe → CoreDNS surchargée sous charge POST → SERVFAIL intermittent. Diagnostic : nslookup redis.librenms.svc.cluster.local. (avec point final) réussit 5/5 fois, sans point final échoue aléatoirement.",
+    "resolution": "Forcer FQDN absolu avec point final dans les variables d'environnement. Le point final bypass les règles ndots et force une résolution directe.",
+    "commands": [
+      "# Dans librenms-deployment.yaml, variables d'environnement :\n- name: REDIS_HOST\n  value: \"redis.librenms.svc.cluster.local.\"    # Point final = bypass ndots",
+      "# Vérifier depuis le pod :\nkubectl exec <pod-name> -n librenms -- nslookup redis.librenms.svc.cluster.local."
+    ],
+    "notes": "Le point final force une résolution directe → 1 requête DNS au lieu de 4-5. Cette approche est plus efficace que modifier /etc/resolv.conf (dnsPolicy) pour chaque pod."
+  },
+  {
+    "id": 10,
+    "title": "LibreNMS : Multi-Replica Session Loss (Sticky sessions requis)",
+    "category": "Kubernetes / Session",
+    "context": "Après correction DNS, login fonctionne intermittently. Erreur \"No user () from IP\" → username vide. Le problème survient quand plusieurs replicas du pod LibreNMS sont actifs.",
+    "symptoms": [
+      "GET /login → pod A (w3)",
+      "POST /login → pod B (w1) par load balancing round-robin",
+      "Erreur : \"No user () from IP\"",
+      "Session Redis créée sur pod A, POST arrive sur pod B"
+    ],
+    "cause": "Deployment avec replicas: 2 sans sticky session. Ingress distribue requêtes entre pods via round-robin. Bien que Redis soit partagé, il y a un timing issue : le formulaire est rendu par pod A, mais les données POST sont traitées par pod B sans contexte de session local.",
+    "resolution": "Configurer sticky sessions au niveau du Service (sessionAffinity) ET au niveau de l'Ingress (cookie-based affinity). Cela garantit qu'un client reste sur le même pod pour sa session.",
+    "commands": [
+      "# Option 1 : kubectl patch\nkubectl patch svc librenms -n librenms -p '{\"spec\":{\"sessionAffinity\":\"ClientIP\"}}'",
+      "# Option 2 : Via manifest librenms-service.yaml\nspec:\n  sessionAffinity: ClientIP\n  sessionAffinityConfig:\n    clientIP:\n      timeoutSeconds: 3600",
+      "# Option 3 : Ingress sticky sessions (librenms-ingress.yaml)\nmetadata:\n  annotations:\n    nginx.ingress.kubernetes.io/affinity: \"cookie\"\n    nginx.ingress.kubernetes.io/session-cookie-name: \"librenms-route\"\n    nginx.ingress.kubernetes.io/session-cookie-expires: \"3600\"\n    nginx.ingress.kubernetes.io/session-cookie-max-age: \"3600\""
+    ],
+    "notes": "Utiliser BOTH Service sessionAffinity ET Ingress affinity pour maximum robustness. Le timeout 3600 secondes = 1 heure (à adapter selon les besoins)."
+  },
+  {
+    "id": 11,
+    "title": "LibreNMS : Liveness/Readiness Probe Timeout (PHP-FPM lent)",
+    "category": "Kubernetes",
+    "context": "Pods LibreNMS font multiple CrashLoopBackOff avec readiness/liveness probes échouant. Les probes timeout systématiquement.",
+    "symptoms": [
+      "Events : \"Readiness probe failed: context deadline exceeded (Client.Timeout exceeded while awaiting headers)\"",
+      "Events : \"Liveness probe failed: Get http://POD:8000/login: context deadline exceeded\"",
+      "Pod killed après failureThreshold=3"
+    ],
+    "cause": "Configuration probe originale avec initialDelaySeconds: 60 et timeoutSeconds: 1 (implicite). PHP-FPM sur ce lab répond en > 1s → probe timeout systématiquement → kubelet tue le pod après 3 tentatives échouées.",
+    "resolution": "Augmenter initialDelaySeconds (pour laisser du temps au démarrage PHP) et ajouter timeoutSeconds explicite avec une valeur suffisante.",
+    "commands": [
+      "# Dans librenms-deployment.yaml :\nreadinessProbe:\n  httpGet:\n    path: /login\n    port: 8000\n  initialDelaySeconds: 120\n  periodSeconds: 15\n  timeoutSeconds: 10\n  failureThreshold: 10\n\nlivenessProbe:\n  httpGet:\n    path: /login\n    port: 8000\n  initialDelaySeconds: 180\n  periodSeconds: 30\n  timeoutSeconds: 10\n  failureThreshold: 5",
+      "kubectl rollout restart deployment/librenms -n librenms"
+    ],
+    "notes": "initialDelaySeconds: 120 pour laisser le temps à PHP-FPM de démarrer. timeoutSeconds: 10 couvre les variations de charge. failureThreshold plus élevé pour éviter les redémarrages inutiles en cas de pic de charge."
+  },
+  {
+    "id": 12,
+    "title": "LibreNMS : Authentification échoue (Hash mot de passe invalide)",
+    "category": "Application",
+    "context": "Interface /login accessible, formulaire rendu, mais POST retourne \"These credentials do not match our records\" malgré utilisateur et mot de passe corrects en DB.",
+    "symptoms": [
+      "GET /login → formulaire affiché (200 OK)",
+      "POST /login avec username=matt, password=Pa$$w0rd → 200 + message erreur \"Invalid credentials\"",
+      "SELECT * FROM users WHERE username='matt' → utilisateur existe, enabled=1, hash bcrypt présent"
+    ],
+    "cause": "Hash bcrypt en DB créé sur l'instance LibreNMS précédente. Lors de la migration vers K8s, soit le mot de passe réel a changé, soit le hash a été corrompu lors de l'export/import. Vérification : le hash ne correspond pas au mot de passe soumis.",
+    "resolution": "Réinitialiser le mot de passe via PHP Tinker (Laravel REPL) exécuté dans le pod LibreNMS.",
+    "commands": [
+      "kubectl exec -n librenms \\\n  $(kubectl get pod -n librenms -l app=librenms -o name | head -1) \\\n  -- sh -c 'cat > /tmp/resetpw.php << '\"'\"'EOF'\"'\"'\n<?php\nrequire \"/opt/librenms/vendor/autoload.php\";\n$app = require \"/opt/librenms/bootstrap/app.php\";\n$app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap();\n$u = App\\Models\\User::where(\"username\", \"matt\")->first();\n$u->password = bcrypt(\"NewPassword123\");\n$u->save();\necho \"OK: \" . $u->username . \"\\n\";\nEOF'",
+      "kubectl exec -n librenms \\\n  $(kubectl get pod -n librenms -l app=librenms -o name | head -1) \\\n  -- su -s /bin/bash librenms -c \"php /tmp/resetpw.php\"",
+      "# Puis tester le login avec le nouveau mot de passe"
+    ],
+    "notes": "Le password doit être transmis via une variable d'environnement ou secret en production. Ne jamais hardcoder les passwords. Utiliser SOPS+age ou Sealed Secrets."
+  }
+]
