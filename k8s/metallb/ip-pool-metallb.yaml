@@ -1,0 +1,27 @@
+# ==============================================================================
+# metallb/ip-pool-metallb.yaml
+# Pool unifié — remplace first-pool + librenms-pool
+#   .240 → ingress-nginx (librenms web + argocd)
+#   .241 → syslog-ng TCP+UDP 514
+#   .242 → snmptrapd TCP+UDP 162
+#   .243-.250 → réservé
+# ==============================================================================
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: first-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - 192.168.98.240-192.168.98.250
+  autoAssign: true
+
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: l2-advert
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - first-pool

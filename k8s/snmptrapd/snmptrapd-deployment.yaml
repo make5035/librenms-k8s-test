@@ -1,0 +1,147 @@
+# ==============================================================================
+# snmptrapd/snmptrapd-deployment.yaml
+# snmptrapd 5.9.4 — Réception traps SNMP
+# ==============================================================================
+# NOUVEAU fichier — composant absent du cluster (actif en prod Docker)
+#
+# Mesures prod : NET I/O 14 Go entrant / 1,28 Go sortant — actif
+# snmptrapd est inclus dans l'image librenms/librenms:26.2.0
+# Activation via variable SIDECAR_SNMPTRAPD=1
+#
+# Exposition réseau :
+#   - Service type LoadBalancer (MetalLB) sur IP dédiée
+#   - Ports 162 TCP et UDP
+#   - Annotation allow-shared-ip : même IP MetalLB pour TCP et UDP
+#
+# Note : snmptrapd n'a pas besoin du PVC librenms-data pour les logs
+# (les traps sont écrits en base via DB_HOST)
+# Les MIBs Fortinet sont chargées via SNMP_EXTRA_MIB_DIRS
+# ==============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: librenms-snmptrapd
+  namespace: librenms
+  labels:
+    app: librenms-snmptrapd
+    component: snmptrap
+    version: "5.9.4"
+spec:
+  replicas: 1
+  # NE PAS scaler > 1 : un seul récepteur de traps
+  selector:
+    matchLabels:
+      app: librenms-snmptrapd
+  template:
+    metadata:
+      labels:
+        app: librenms-snmptrapd
+        component: snmptrap
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+      - name: snmptrapd
+        image: librenms/librenms:26.2.0
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          capabilities:
+            add:
+              - NET_ADMIN
+              - NET_RAW
+        ports:
+        - containerPort: 162
+          name: snmptrap-tcp
+          protocol: TCP
+        - containerPort: 162
+          name: snmptrap-udp
+          protocol: UDP
+        env:
+        - name: SIDECAR_SNMPTRAPD
+          value: "1"
+        - name: TZ
+          value: "Europe/Paris"
+        - name: PUID
+          value: "1000"
+        - name: PGID
+          value: "1000"
+        - name: DB_HOST
+          value: "192.168.98.131"
+        - name: DB_PORT
+          value: "3306"
+        - name: DB_NAME
+          value: "librenms"
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: librenms-secret
+              key: db-username
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: librenms-secret
+              key: db-password
+        - name: DB_TIMEOUT
+          value: "60"
+        - name: SNMP_EXTRA_MIB_DIRS
+          value: "mibs/fortinet:mibs/fortinet/FORTINET-FORTIGATE-MIB"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "64Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+        volumeMounts:
+        # Accès aux MIBs custom stockées dans le PVC librenms-data
+        - name: librenms-data
+          mountPath: /data
+      volumes:
+      - name: librenms-data
+        persistentVolumeClaim:
+          claimName: librenms-data-pvc
+
+---
+# Service snmptrapd TCP — LoadBalancer MetalLB IP fixe
+apiVersion: v1
+kind: Service
+metadata:
+  name: librenms-snmptrapd-tcp
+  namespace: librenms
+  labels:
+    app: librenms-snmptrapd
+  annotations:
+    metallb.universe.tf/allow-shared-ip: "librenms-snmptrap"
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 192.168.98.242
+  selector:
+    app: librenms-snmptrapd
+  ports:
+  - name: snmptrap-tcp
+    port: 162
+    targetPort: 162
+    protocol: TCP
+
+---
+# Service snmptrapd UDP — LoadBalancer MetalLB même IP
+apiVersion: v1
+kind: Service
+metadata:
+  name: librenms-snmptrapd-udp
+  namespace: librenms
+  labels:
+    app: librenms-snmptrapd
+  annotations:
+    metallb.universe.tf/allow-shared-ip: "librenms-snmptrap"
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 192.168.98.242
+  selector:
+    app: librenms-snmptrapd
+  ports:
+  - name: snmptrap-udp
+    port: 162
+    targetPort: 162
+    protocol: UDP
