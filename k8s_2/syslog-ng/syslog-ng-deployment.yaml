@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: syslog-ng
+  namespace: librenms
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: syslog-ng
+  template:
+    metadata:
+      labels:
+        app: syslog-ng
+    spec:
+      containers:
+        - name: syslog-ng
+          # syslog-ng 4.8.3 embarqué dans l'image LibreNMS (mode sidecar),
+          # identique au fonctionnement Docker Compose actuel.
+          image: repos-nexus.cpa-sante.priv/docker-group-repo/librenms/librenms:26.6.1
+          env:
+            - name: SIDECAR_SYSLOGNG
+              value: "1"
+            - name: TZ
+              value: "Europe/Paris"
+          envFrom:
+            - secretRef:
+                name: librenms-poller-secret
+          ports:
+            - containerPort: 514
+              protocol: TCP
+            - containerPort: 514
+              protocol: UDP
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+---
+# Gateway API ne gère pas l'UDP (UDPRoute non GA) : exposition directe
+# via Service LoadBalancer MetalLB, IP fixe réservée dans le pool.
+apiVersion: v1
+kind: Service
+metadata:
+  name: syslog-ng
+  namespace: librenms
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: "<IP_METALLB_SYSLOG>"
+spec:
+  type: LoadBalancer
+  selector:
+    app: syslog-ng
+  ports:
+    - name: syslog-tcp
+      port: 514
+      targetPort: 514
+      protocol: TCP
+    - name: syslog-udp
+      port: 514
+      targetPort: 514
+      protocol: UDP

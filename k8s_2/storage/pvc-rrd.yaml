@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rrd-pvc
+  namespace: librenms
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 1536Gi   # 664 Go mesurés x2 + marge 20% (prod). Réduire en lab.

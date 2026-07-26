@@ -1,0 +1,56 @@
+# Job de migration RRD — remplace le pod "sleep" + tar pipe kubectl exec (v1.3),
+# qui violait la règle ArgoCD-only (kubectl exec -i = opération de migration).
+#
+# Principe : le Job est versionné dans k8s/tools/, activé par commit + sync
+# ArgoCD (sync-wave 5), tire les données via rsync depuis un démon rsyncd
+# temporaire en LECTURE SEULE sur la VM Docker source, écrit sur le PVC
+# rrd-pvc, se termine Completed, puis est retiré par revert + sync.
+# Aucune commande kubectl en écriture n'intervient.
+#
+# Idempotent : relançable sans risque (rsync ne recopie que les deltas).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rrd-migration
+  namespace: librenms
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  backoffLimit: 2
+  # Pas de ttlSecondsAfterFinished : le Job reste visible pour audit
+  # jusqu'à son retrait par revert Git.
+  template:
+    metadata:
+      labels:
+        app: rrd-migration
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: rsync
+          # Image outillée rsync disponible dans Nexus (ex : instrumentisto/
+          # rsync-ssh). Valider le tag par un pull de test avant activation.
+          image: repos-nexus.cpa-sante.priv/docker-group-repo/instrumentisto/rsync-ssh:alpine
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Début migration RRD : $(date)"
+              rsync -av --stats \
+                rsync://<IP_VM_DOCKER>:8730/rrd/ \
+                /data/db/
+              echo "Fin migration RRD : $(date)"
+          volumeMounts:
+            - name: rrd
+              mountPath: /data/db
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+            limits:
+              cpu: "2"
+              memory: "1Gi"
+      volumes:
+        - name: rrd
+          persistentVolumeClaim:
+            claimName: rrd-pvc
