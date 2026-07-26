@@ -28,6 +28,36 @@ spec:
             - sh
             - -c
             - "until nc -z redis.librenms.svc.cluster.local. 6379; do sleep 2; done"
+        - name: generate-env
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              cat > /data/.env <<ENV
+              APP_KEY=${APP_KEY}
+              DB_HOST=${DB_HOST}
+              DB_PORT=${DB_PORT}
+              DB_DATABASE=${DB_NAME}
+              DB_USERNAME=${DB_USER}
+              DB_PASSWORD=${DB_PASSWORD}
+              ENV
+          envFrom:
+            - configMapRef:
+                name: librenms-config
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: {name: librenms-secrets, key: DB_USER}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: librenms-secrets, key: DB_PASSWORD}
+            - name: APP_KEY
+              valueFrom:
+                secretKeyRef: {name: librenms-secrets, key: APP_KEY}
+          volumeMounts:
+            - name: poller-data
+              mountPath: /data
       containers:
         - name: poller
           image: librenms/librenms:26.6.1
@@ -57,6 +87,8 @@ spec:
             - configMapRef:
                 name: librenms-config
           volumeMounts:
+            - name: poller-data
+              mountPath: /data
             - name: rrd
               mountPath: /data/rrd
           resources:
@@ -64,6 +96,8 @@ spec:
               cpu: "250m"
               memory: "512Mi"
       volumes:
+        - name: poller-data
+          emptyDir: {}
         - name: rrd
           persistentVolumeClaim:
             claimName: librenms-rrd
