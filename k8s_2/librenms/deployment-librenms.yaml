@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: librenms
+  namespace: librenms
+  labels:
+    app: librenms
+spec:
+  replicas: 2            # Lab : 1 (contrainte RAM cp1). Prod : 2.
+  selector:
+    matchLabels:
+      app: librenms
+  template:
+    metadata:
+      labels:
+        app: librenms
+    spec:
+      initContainers:
+        # Erreur #8 documentée : race condition DNS au démarrage du pod.
+        - name: wait-for-redis
+          image: repos-nexus.cpa-sante.priv/docker-group-repo/busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Attente de Redis..."
+              until nc -z redis.librenms.svc.cluster.local. 6379; do
+                sleep 2
+              done
+              echo "Redis OK"
+      containers:
+        - name: librenms
+          # Cible production : 26.6.1 — lab validé sur 26.2.0
+          image: repos-nexus.cpa-sante.priv/docker-group-repo/librenms/librenms:26.6.1
+          env:
+            - name: TZ
+              value: "Europe/Paris"
+            - name: DB_HOST
+              value: "<IP_VM_MARIADB>"
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_DATABASE
+              value: "librenms"
+            # LibreNMS attend DB_USERNAME (pas DB_USER)
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: librenms-secret
+                  key: db-username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: librenms-secret
+                  key: db-password
+            # Erreur #9 documentée : FQDN avec point final — bypass ndots:5
+            - name: REDIS_HOST
+              value: "redis.librenms.svc.cluster.local."
+            - name: RRDCACHED_SERVER
+              value: "<IP_VM_RRDCACHED>:42217"
+          ports:
+            - containerPort: 8000
+          # Erreur #11 documentée : PHP-FPM lent au démarrage
+          readinessProbe:
+            httpGet:
+              path: /login
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /login
+              port: 8000
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "1"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "1Gi"
+          volumeMounts:
+            - name: rrd
+              mountPath: /opt/librenms/rrd
+      volumes:
+        - name: rrd
+          persistentVolumeClaim:
+            claimName: rrd-pvc

@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: snmptrapd
+  namespace: librenms
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: snmptrapd
+  template:
+    metadata:
+      labels:
+        app: snmptrapd
+    spec:
+      containers:
+        - name: snmptrapd
+          # snmptrapd 5.9.4 embarqué dans l'image LibreNMS (mode sidecar)
+          image: repos-nexus.cpa-sante.priv/docker-group-repo/librenms/librenms:26.6.1
+          env:
+            - name: SIDECAR_SNMPTRAPD
+              value: "1"
+            - name: TZ
+              value: "Europe/Paris"
+          envFrom:
+            - secretRef:
+                name: librenms-poller-secret
+          ports:
+            - containerPort: 162
+              protocol: UDP
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: snmptrapd
+  namespace: librenms
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: "<IP_METALLB_TRAPD>"
+spec:
+  type: LoadBalancer
+  selector:
+    app: snmptrapd
+  ports:
+    - name: snmptrap
+      port: 162
+      targetPort: 162
+      protocol: UDP
