@@ -23,14 +23,14 @@ spec:
     spec:
       initContainers:
         - name: wait-for-redis
-          image: repos-nexus.cpa-sante.priv/docker-group-repo/library/busybox:1.36
+          image: busybox:1.36
           command:
             - sh
             - -c
             - "until nc -z redis.librenms.svc.cluster.local. 6379; do sleep 2; done"
       containers:
         - name: poller
-          image: repos-nexus.cpa-sante.priv/docker-group-repo/librenms/librenms:26.6.1
+          image: librenms/librenms:26.6.1
           env:
             - name: DISPATCHER_NODE_ID
               valueFrom:
