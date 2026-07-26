@@ -1,0 +1,279 @@
+# ==============================================================================
+# compose.librenms-source.yml
+# ==============================================================================
+# Stack SOURCE LibreNMS (Docker Compose) — réplique de production pour le lab,
+# référence de comparaison AVANT/APRÈS migration Kubernetes.
+#
+# [SÉPARATION HUB AND SPOKE] ArgoCD a été RETIRÉ de ce fichier (-> compose.argocd-hub.yml).
+#   ArgoCD ne démarre qu'APRÈS le cluster (§6). Le fusionner ici casse le pattern
+#   et provoque un crash-loop pré-cluster (fiche #15).
+#
+# [PRÉREQUIS §4] Deux fichiers gitignorés à créer AVANT `up` (fiche #14) :
+#   - .env         (interpolation ${...} : TZ, PUID/PGID, MYSQL_*, REDIS_*, POLLER_NAME, SIDECAR_DISPATCHER)
+#   - librenms.env (env_file : config applicative dont APP_KEY)
+#   Modèles fournis : .env.example / librenms.env.example.
+#
+# [REGISTRE NEXUS] Images ci-dessous en amont Docker Hub (stack validée telle quelle).
+#   Pour repointer vers le Nexus interne, préfixer chaque image :
+#     mariadb:10.5           -> repos-nexus.cpa-sante.priv/docker-group-repo/library/mariadb:10.5
+#     redis:5.0-alpine       -> repos-nexus.cpa-sante.priv/docker-group-repo/library/redis:5.0-alpine
+#     memcached:1.6.41       -> repos-nexus.cpa-sante.priv/docker-group-repo/library/memcached:1.6.41
+#     crazymax/rrdcached:... -> repos-nexus.cpa-sante.priv/docker-group-repo/crazymax/rrdcached:...
+#     librenms/librenms:...  -> repos-nexus.cpa-sante.priv/docker-group-repo/librenms/librenms:...
+#   (Hypothèse à confirmer : préfixe `library/` requis pour les images officielles
+#    proxifiées ; à valider selon la configuration du dépôt Docker Nexus.)
+#
+# Démarrage : docker compose -f compose.librenms-source.yml up -d
+# ==============================================================================
+
+services:
+
+  # ── MariaDB 10.5.29 ─────────────────────────────────────────────────────────
+  mariadb:
+    image: mariadb:10.5
+    container_name: librenms_test_mariadb
+    hostname: mariadb
+    command:
+      - "mysqld"
+      - "--innodb-file-per-table=1"
+      - "--lower-case-table-names=0"
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+      - "--max_connections=1000"
+    volumes:
+      - "./data/db:/var/lib/mysql"
+    ports:
+      - "3306:3306"
+    environment:
+      - "TZ=${TZ}"
+      - "MYSQL_ALLOW_EMPTY_PASSWORD=yes"
+      - "MYSQL_DATABASE=${MYSQL_DATABASE}"
+      - "MYSQL_USER=${MYSQL_USER}"
+      - "MYSQL_PASSWORD=${MYSQL_PASSWORD}"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "--silent"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: always
+    networks:
+      - net
+
+  # ── RRDcached 1.9.0-r4 ──────────────────────────────────────────────────────
+  rrdcached:
+    image: crazymax/rrdcached:1.9.0-r4
+    container_name: librenms_test_rrdcached
+    hostname: rrdcached
+    volumes:
+      - "./data/rrdcached/db:/data/db"
+      - "./data/rrdcached/journal:/data/journal"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "LOG_LEVEL=LOG_INFO"
+      - "WRITE_TIMEOUT=1800"
+      - "WRITE_JITTER=1800"
+      - "WRITE_THREADS=4"
+      - "FLUSH_DEAD_DATA_INTERVAL=3600"
+    ports:
+      - "42217:42217"
+    restart: always
+    networks:
+      - net
+
+  # ── Memcached 1.6.41 ────────────────────────────────────────────────────────
+  memcached:
+    image: memcached:1.6.41
+    container_name: librenms_test_memcached
+    hostname: memcached
+    environment:
+      - "TZ=${TZ}"
+    restart: always
+    networks:
+      - net
+
+  # ── Redis 5.0.14 ────────────────────────────────────────────────────────────
+  redis:
+    image: redis:5.0-alpine
+    container_name: librenms_test_redis
+    hostname: redis
+    environment:
+      - "TZ=${TZ}"
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: always
+    networks:
+      - net
+
+  # ── LibreNMS 26.2.0 — Frontend ──────────────────────────────────────────────
+  librenms:
+    image: librenms/librenms:26.2.0
+    container_name: librenms_test_web
+    hostname: librenms
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    ports:
+      - target: 8000
+        published: 8000
+        protocol: tcp
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      memcached:
+        condition: service_started
+      rrdcached:
+        condition: service_started
+    volumes:
+      - "./data/librenms:/data"
+      - "./data/rrdcached/db:/mnt/rrdcached/db"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=${MYSQL_HOST}"
+      - "DB_NAME=${MYSQL_DATABASE}"
+      - "DB_USER=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "REDIS_HOST=${REDIS_HOST}"
+      - "REDIS_PORT=${REDIS_PORT}"
+      - "REDIS_DB=0"
+      - "RRDCACHED_SERVER=rrdcached:42217"
+    restart: always
+    networks:
+      - net
+
+  # ── Dispatcher / Poller ─────────────────────────────────────────────────────
+  dispatcher:
+    image: librenms/librenms:26.2.0
+    container_name: librenms_test_dispatcher
+    hostname: librenms-poller-test01
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      librenms:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      rrdcached:
+        condition: service_started
+    volumes:
+      - "./data/librenms:/data"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=${MYSQL_HOST}"
+      - "DB_NAME=${MYSQL_DATABASE}"
+      - "DB_USER=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "DISPATCHER_NODE_ID=poller-test-01"
+      - "REDIS_HOST=${REDIS_HOST}"
+      - "REDIS_PORT=${REDIS_PORT}"
+      - "REDIS_DB=0"
+      - "REDIS_SCHEME=tcp"
+      - "REDIS_PASSWORD="
+      - "SIDECAR_DISPATCHER=1"
+      - "RRDCACHED_SERVER=rrdcached:42217"
+    restart: always
+    networks:
+      - net
+
+  # ── Syslog-ng ────────────────────────────────────────────────────────────────
+  syslogng:
+    image: librenms/librenms:26.2.0
+    container_name: librenms_test_syslogng
+    hostname: librenms-syslogng
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      librenms:
+        condition: service_started
+    ports:
+      - target: 514
+        published: 514
+        protocol: tcp
+      - target: 514
+        published: 514
+        protocol: udp
+    volumes:
+      - "./data/librenms:/data"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=${MYSQL_HOST}"
+      - "DB_NAME=${MYSQL_DATABASE}"
+      - "DB_USER=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "REDIS_HOST=${REDIS_HOST}"
+      - "REDIS_PORT=${REDIS_PORT}"
+      - "REDIS_DB=0"
+      - "SIDECAR_SYSLOGNG=1"
+    restart: always
+    networks:
+      - net
+
+  # ── SNMPTrapd ────────────────────────────────────────────────────────────────
+  snmptrapd:
+    image: librenms/librenms:26.2.0
+    container_name: librenms_test_snmptrapd
+    hostname: librenms-snmptrapd
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      librenms:
+        condition: service_started
+    ports:
+      - target: 162
+        published: 162
+        protocol: tcp
+      - target: 162
+        published: 162
+        protocol: udp
+    volumes:
+      - "./data/librenms:/data"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=${MYSQL_HOST}"
+      - "DB_NAME=${MYSQL_DATABASE}"
+      - "DB_USER=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "SIDECAR_SNMPTRAPD=1"
+    restart: always
+    networks:
+      - net
+
+# ── Réseau ──────────────────────────────────────────────────────────────────────
+networks:
+  net:
+    driver: "bridge"
+    ipam:
+      config:
+        - subnet: 10.200.0.0/24
