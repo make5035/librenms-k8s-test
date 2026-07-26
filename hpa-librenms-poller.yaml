@@ -1,0 +1,29 @@
+# Prérequis : CRDs Gateway API v1.0 (standard channel) installées,
+# Cilium >= 1.15 avec gatewayAPI.enabled=true et kubeProxyReplacement=true.
+# L'adresse externe du Gateway est attribuée par MetalLB (Service LoadBalancer
+# créé par Cilium pour ce Gateway).
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: librenms-gateway
+  namespace: librenms
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: librenms-tls   # Certificat interne — chiffré via SOPS avant commit
+      allowedRoutes:
+        namespaces:
+          from: Same

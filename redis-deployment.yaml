@@ -1,0 +1,16 @@
+# Service headless — requis par le StatefulSet (spec.serviceName) pour
+# fournir une identité DNS stable par pod :
+#   librenms-poller-0.librenms-poller.librenms.svc.cluster.local
+apiVersion: v1
+kind: Service
+metadata:
+  name: librenms-poller
+  namespace: librenms
+spec:
+  clusterIP: None
+  selector:
+    app: librenms-poller
+  ports:
+    - name: dispatcher
+      port: 8000
+      targetPort: 8000
