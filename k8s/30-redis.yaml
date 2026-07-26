@@ -18,8 +18,8 @@ spec:
     spec:
       containers:
         - name: redis
-          # TODO Nexus : repos-nexus.cpa-sante.priv/docker-group-repo/library/redis:7.2-alpine
-          image: repos-nexus.cpa-sante.priv/docker-group-repo/library/redis:7.2-alpine
+          # TODO Nexus : redis:7.2-alpine
+          image: redis:7.2-alpine
           ports:
             - containerPort: 6379
           readinessProbe:
