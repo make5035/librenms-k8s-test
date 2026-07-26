@@ -1,0 +1,19 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: librenms
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:make5035/librenms-k8s-test.git
+    targetRevision: main
+    path: k8s
+  destination:
+    server: https://192.168.98.138:6443
+    namespace: librenms
+  syncPolicy:
+    # Sync MANUELLE pendant toute la phase de migration (contrôle humain).
+    # L'automatisation (automated/prune/selfHeal) est une évolution post-validation.
+    syncOptions:
+      - CreateNamespace=true

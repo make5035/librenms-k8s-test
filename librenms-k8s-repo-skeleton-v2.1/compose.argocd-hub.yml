@@ -1,0 +1,132 @@
+# ==============================================================================
+# compose.argocd-hub.yml   (v2.1 — corrections issues du déploiement réel)
+# ==============================================================================
+# HUB ArgoCD (Hub and Spoke) — VM docker (192.168.98.140), EXTERNE au cluster K8s.
+#
+# CORRECTIONS v2.1 vs v2.0 (toutes constatées en conditions réelles) :
+#   [FIX #20] --namespace argocd sur argocd-server ET application-controller :
+#             hors cluster, ArgoCD retombe sur namespace=default et ne trouve
+#             pas argocd-cm (erreur "configmap argocd-cm not found").
+#   [FIX #21] known_hosts monté au chemin RÉELLEMENT lu par le repo-server :
+#             /app/config/ssh/ssh_known_hosts (et non ~/.ssh/known_hosts, ignoré).
+#             La ConfigMap cluster argocd-ssh-known-hosts-cm N'A AUCUN EFFET sur
+#             ce hub Docker (ressource K8s non lue par un conteneur autonome).
+#   [FIX #19] restart: unless-stopped (et non always) : "always" relance même un
+#             conteneur arrêté manuellement après un reboot => conteneurs zombies
+#             en crash-loop avec un ancien montage figé.
+#
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ NE PAS DÉMARRER AVANT §6. Ordre : §5 cluster Ready → §6.1 bootstrap       │
+# │ (install.yaml v2.10.6 + scale 0 des Deployments ET du StatefulSet) →      │
+# │ §6.2 kubeconfig 644 FICHIER (jamais un répertoire) → §6.3 up -d.          │
+# └──────────────────────────────────────────────────────────────────────────┘
+#
+# Prérequis SSH sur .140 (port 22 ouvert ici, pas de SSH-sur-443 nécessaire) :
+#   - clé déploiement ~/.ssh/id_ed25519 (générée sur cp1, distribuée, deploy key GitHub)
+#   - known_hosts GitHub : ssh-keyscan github.com > ~/argocd-ssh-known-hosts
+#
+# [REGISTRE NEXUS] images amont ; repointage à compléter (TODO) :
+#   quay.io/argoproj/argocd:v2.10.6 -> repos-nexus.cpa-sante.priv/docker-group-repo/argoproj/argocd:v2.10.6
+#   redis:7.0-alpine                -> repos-nexus.cpa-sante.priv/docker-group-repo/library/redis:7.0-alpine
+# ==============================================================================
+
+services:
+
+  argocd-redis:
+    image: redis:7.0-alpine
+    container_name: argocd_redis
+    hostname: argocd-redis
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--port", "6380"]
+    network_mode: host
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6380", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  argocd-repo-server:
+    image: quay.io/argoproj/argocd:v2.10.6
+    container_name: argocd_repo_server
+    hostname: argocd-repo-server
+    command:
+      - argocd-repo-server
+      - --redis
+      - localhost:6380
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - ARGOCD_REPO_SERVER_DISABLE_TLS=true
+      - REDIS_SERVER=localhost:6380
+    volumes:
+      # Auth Git NOMINALE (montage). Alternative : objet Repository via l'UI (§8).
+      - "/home/matt/.ssh/id_ed25519:/home/argocd/.ssh/id_ed25519:ro"
+      # [FIX #21] chemin réellement lu par le repo-server pour la vérif d'hôte :
+      - "/home/matt/argocd-ssh-known-hosts:/app/config/ssh/ssh_known_hosts:ro"
+    healthcheck:
+      test: ["CMD", "argocd", "version", "--client"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  argocd-application-controller:
+    image: quay.io/argoproj/argocd:v2.10.6
+    container_name: argocd_app_controller
+    hostname: argocd-application-controller
+    command:
+      - argocd-application-controller
+      - --repo-server
+      - localhost:8081
+      - --repo-server-plaintext
+      - --namespace          # [FIX #20]
+      - argocd
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - REDIS_SERVER=localhost:6380
+    volumes:
+      - "/opt/argocd/kubeconfig:/home/argocd/.kube/config:ro"
+    depends_on:
+      argocd-redis:
+        condition: service_healthy
+      argocd-repo-server:
+        condition: service_started
+
+  argocd-server:
+    image: quay.io/argoproj/argocd:v2.10.6
+    container_name: argocd_server
+    hostname: argocd-server
+    command:
+      - argocd-server
+      - --insecure
+      - --repo-server
+      - localhost:8081
+      - --repo-server-plaintext
+      - --namespace          # [FIX #20]
+      - argocd
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - REDIS_SERVER=localhost:6380
+    volumes:
+      - "/opt/argocd/kubeconfig:/home/argocd/.kube/config:ro"
+    depends_on:
+      argocd-redis:
+        condition: service_healthy
+      argocd-repo-server:
+        condition: service_started
+      argocd-application-controller:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+# ==============================================================================
+# ACCÈS — UI uniquement. http://192.168.98.140:8080 (admin ; mot de passe :
+#   k -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)
+#   ROTATION IMMÉDIATE : UI > USER INFO > UPDATE PASSWORD (bloquant).
+# ==============================================================================

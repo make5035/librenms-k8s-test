@@ -1,0 +1,19 @@
+# Wave 4. Route HTTP -> Service librenms:8000.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: librenms
+  namespace: librenms
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  parentRefs:
+    - name: librenms-gw
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: librenms
+          port: 8000

@@ -1,0 +1,15 @@
+# Wave 2. RRD partagé en RWX (NFS). Volumétrie prod : centaines de Go.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: librenms-rrd
+  namespace: librenms
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 300Gi

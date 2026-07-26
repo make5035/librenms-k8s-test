@@ -1,0 +1,22 @@
+# Wave 4. HPA scalant nativement le StatefulSet des pollers (nécessite metrics-server).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: librenms-poller
+  namespace: librenms
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: librenms-poller
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
