@@ -1,0 +1,56 @@
+# OPTION B — RRDcached rapatrié dans le cluster (homogénéité GitOps).
+# OPTION A (état validé en lab et en prod) : RRDcached sur VM externe dédiée
+# (RRDtool 1.9.0), export NFS vers le cluster. Ne déployer ce manifest qu'après
+# décision explicite — les deux options sont exclusives.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rrdcached
+  namespace: librenms
+spec:
+  serviceName: rrdcached
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rrdcached
+  template:
+    metadata:
+      labels:
+        app: rrdcached
+    spec:
+      containers:
+        - name: rrdcached
+          image: repos-nexus.cpa-sante.priv/docker-group-repo/crazymax/rrdcached:1.9.0
+          ports:
+            - containerPort: 42217
+          env:
+            - name: WRITE_TIMEOUT
+              value: "1800"
+            - name: WRITE_JITTER
+              value: "1800"   # > 0 obligatoire — lissage I/O (592k fichiers .rrd)
+          volumeMounts:
+            - name: rrd
+              mountPath: /data/db
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+      volumes:
+        - name: rrd
+          persistentVolumeClaim:
+            claimName: rrd-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rrdcached
+  namespace: librenms
+spec:
+  selector:
+    app: rrdcached
+  ports:
+    - port: 42217
+      targetPort: 42217

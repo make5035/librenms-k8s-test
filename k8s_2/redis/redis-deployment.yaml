@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: librenms
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          # Alignement version production : Redis 7.2.14 — épingler le tag patch
+          # exact disponible dans Nexus (7.2.x). Lab historique : 5.0-alpine ;
+          # montée de version à valider en lab avant bascule (pas de breaking
+          # change identifié côté Predis/queue Laravel entre 5.0 et 7.2).
+          image: repos-nexus.cpa-sante.priv/docker-group-repo/redis:7.2-alpine
+          args: ["--appendonly", "no"]   # Queue volatile — AOF sur NFS déconseillé (corruption constatée en lab)
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: librenms
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
